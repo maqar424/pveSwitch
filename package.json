@@ -1,0 +1,27 @@
+{
+  "name": "pveswitch",
+  "version": "1.0.0",
+  "main": "index.ts",
+  "dependencies": {
+    "@expo/vector-icons": "^15.0.2",
+    "buffer": "^6.0.3",
+    "expo": "~56.0.12",
+    "expo-haptics": "~56.0.3",
+    "expo-linear-gradient": "~56.0.4",
+    "expo-status-bar": "~56.0.4",
+    "react": "19.2.3",
+    "react-native": "0.85.3",
+    "react-native-tcp-socket": "^6.4.1"
+  },
+  "devDependencies": {
+    "@types/react": "~19.2.2",
+    "typescript": "~6.0.3"
+  },
+  "scripts": {
+    "start": "expo start",
+    "android": "expo start --android",
+    "ios": "expo start --ios",
+    "web": "expo start --web"
+  },
+  "private": true
+}
