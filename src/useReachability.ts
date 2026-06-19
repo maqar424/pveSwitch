@@ -1,17 +1,17 @@
 /**
- * Polls the configured hosts with a TCP reachability check on an interval and
- * returns each host's status keyed by `HostCheck.key`.
+ * Polls the configured (non-NAS) hosts with a TCP reachability check on an
+ * interval and returns each host's status keyed by `PingHost.key`.
  */
 import { useEffect, useState } from 'react';
-import { HOSTS } from './config';
+import { PING_HOSTS, REACH_INTERVAL_MS } from './config';
 import { tcpPing } from './ping';
 
 export type Reach = 'checking' | 'up' | 'down';
 
 const initial = (): Record<string, Reach> =>
-  Object.fromEntries(HOSTS.map((h) => [h.key, 'checking'])) as Record<string, Reach>;
+  Object.fromEntries(PING_HOSTS.map((h) => [h.key, 'checking'])) as Record<string, Reach>;
 
-export function useReachability(intervalMs = 5000): Record<string, Reach> {
+export function useReachability(intervalMs = REACH_INTERVAL_MS): Record<string, Reach> {
   const [status, setStatus] = useState<Record<string, Reach>>(initial);
 
   useEffect(() => {
@@ -19,8 +19,9 @@ export function useReachability(intervalMs = 5000): Record<string, Reach> {
 
     const run = async () => {
       const results = await Promise.all(
-        HOSTS.map(
-          async (h) => [h.key, (await tcpPing(h.host, h.port)) ? 'up' : 'down'] as const,
+        PING_HOSTS.map(
+          async (h) =>
+            [h.key, (await tcpPing(h.host, h.port, 2500, h.strict)) ? 'up' : 'down'] as const,
         ),
       );
       if (active) setStatus(Object.fromEntries(results) as Record<string, Reach>);

@@ -1,14 +1,21 @@
 /**
- * Owns the persistent MQTT connection and exposes the plug's live state,
- * its latest energy reading, and a single `toggle()` that flips it.
+ * Owns the persistent MQTT connection and exposes the plug's live state, its
+ * latest energy reading, NAS reachability (derived from the connection), and a
+ * single `toggle()` that flips it.
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { MqttClient } from './mqtt';
 import { BROKER, GET_TOPIC, SET_TOPIC, STATE_TOPIC } from './config';
+import type { Reach } from './useReachability';
 
 export type PlugState = 'on' | 'off' | null;
 
+/** Grace window before a missing connection is reported as "down" (vs "checking"). */
+const NAS_GRACE_MS = 5000;
+
 export interface PlugApi {
+  /** NAS reachability, derived from the live MQTT link. */
+  nas: Reach;
   connected: boolean;
   state: PlugState;
   energy: number | null;
@@ -18,24 +25,39 @@ export interface PlugApi {
 
 export function usePlug(): PlugApi {
   const [connected, setConnected] = useState(false);
+  const [nasChecking, setNasChecking] = useState(true);
   const [state, setState] = useState<PlugState>(null);
   const [energy, setEnergy] = useState<number | null>(null);
   const [pending, setPending] = useState(false);
 
   const clientRef = useRef<MqttClient | null>(null);
   const pendingTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const graceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
+    const startGrace = () => {
+      if (graceTimer.current) clearTimeout(graceTimer.current);
+      setNasChecking(true);
+      graceTimer.current = setTimeout(() => setNasChecking(false), NAS_GRACE_MS);
+    };
+
+    startGrace();
+
     const client = new MqttClient(
       { host: BROKER.host, port: BROKER.port, keepAliveSeconds: 60 },
       {
         onConnect: () => {
           setConnected(true);
+          setNasChecking(false);
+          if (graceTimer.current) clearTimeout(graceTimer.current);
           client.subscribe(STATE_TOPIC);
           // Ask the device to report its current state + energy right away.
           client.publish(GET_TOPIC, JSON.stringify({ state: '', energy: '' }));
         },
-        onDisconnect: () => setConnected(false),
+        onDisconnect: () => {
+          setConnected(false);
+          startGrace();
+        },
         onMessage: (topic, payload) => {
           if (topic !== STATE_TOPIC) return;
           try {
@@ -56,6 +78,7 @@ export function usePlug(): PlugApi {
     return () => {
       client.disconnect();
       if (pendingTimer.current) clearTimeout(pendingTimer.current);
+      if (graceTimer.current) clearTimeout(graceTimer.current);
     };
   }, []);
 
@@ -87,5 +110,7 @@ export function usePlug(): PlugApi {
     pendingTimer.current = setTimeout(() => setPending(false), 6000);
   }, [connected, state, pending]);
 
-  return { connected, state, energy, pending, toggle };
+  const nas: Reach = connected ? 'up' : nasChecking ? 'checking' : 'down';
+
+  return { nas, connected, state, energy, pending, toggle };
 }

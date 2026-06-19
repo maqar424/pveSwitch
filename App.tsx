@@ -10,7 +10,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Feather } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 
-import { ENERGY_UNIT, HOSTS, type HostCheck } from './src/config';
+import { ENERGY_UNIT, NAS, PING_HOSTS } from './src/config';
 import { usePlug } from './src/usePlug';
 import { useReachability, type Reach } from './src/useReachability';
 
@@ -25,18 +25,46 @@ const COL = {
   on: '#34d399',
   off: '#5c6675',
   muted: '#39414f',
+  booting: '#fbbf24',
   up: '#34d399',
   down: '#f87171',
   checking: '#fbbf24',
 };
 
 export default function App() {
-  const { connected, state, energy, pending, toggle } = usePlug();
+  const { nas, connected, state, energy, pending, toggle } = usePlug();
   const reach = useReachability();
 
+  const vmUp = reach[PING_HOSTS[1].key] === 'up';
   const ready = connected && state !== null;
   const isOn = state === 'on';
-  const ringColor = !ready ? COL.muted : isOn ? COL.on : COL.off;
+  const booting = ready && isOn && !vmUp; // plug on, VM not reachable yet
+
+  // The big control is only "green / Server on" once the VM is actually up.
+  const ringColor = !ready
+    ? COL.muted
+    : isOn
+      ? vmUp
+        ? COL.on
+        : COL.booting
+      : COL.off;
+
+  const showSpinner = !ready || pending || booting;
+
+  const stateWord = !connected
+    ? 'Connecting'
+    : state === null
+      ? 'Reading state'
+      : pending
+        ? 'Switching'
+        : isOn
+          ? vmUp
+            ? 'Server on'
+            : 'Booting…'
+          : 'Server off';
+
+  const tapHint =
+    ready && !pending ? (isOn ? 'Tap to turn off' : 'Tap to turn on') : ' ';
 
   const onToggle = () => {
     if (!ready || pending) return;
@@ -44,15 +72,11 @@ export default function App() {
     toggle();
   };
 
-  const stateWord = !ready
-    ? connected
-      ? 'Reading state'
-      : 'Connecting'
-    : isOn
-      ? 'Server on'
-      : 'Server off';
-
-  const tapHint = ready ? (isOn ? 'Tap to turn off' : 'Tap to turn on') : ' ';
+  const rows = [
+    { label: NAS.label, host: NAS.host, reach: nas, depth: 0 },
+    { label: PING_HOSTS[0].label, host: PING_HOSTS[0].host, reach: reach[PING_HOSTS[0].key], depth: 1 },
+    { label: PING_HOSTS[1].label, host: PING_HOSTS[1].host, reach: reach[PING_HOSTS[1].key], depth: 2 },
+  ];
 
   return (
     <View style={styles.root}>
@@ -77,7 +101,7 @@ export default function App() {
             },
           ]}
         >
-          {pending ? (
+          {showSpinner ? (
             <ActivityIndicator color={ringColor} size="large" />
           ) : (
             <Feather name="power" size={66} color={ringColor} />
@@ -98,21 +122,37 @@ export default function App() {
       </View>
 
       <View style={styles.statusCard}>
-        {reach.nas === 'down' && (
+        {nas === 'down' && (
           <View style={styles.hint}>
             <Feather name="alert-triangle" size={13} color={COL.checking} />
             <Text style={styles.hintText}>Can&rsquo;t reach your network — turn on Tailscale.</Text>
           </View>
         )}
-        {HOSTS.map((host, i) => (
-          <StatusRow key={host.key} host={host} reach={reach[host.key]} depth={i} />
+        {rows.map((row) => (
+          <StatusRow
+            key={row.label}
+            label={row.label}
+            host={row.host}
+            reach={row.reach}
+            depth={row.depth}
+          />
         ))}
       </View>
     </View>
   );
 }
 
-function StatusRow({ host, reach, depth }: { host: HostCheck; reach: Reach; depth: number }) {
+function StatusRow({
+  label,
+  host,
+  reach,
+  depth,
+}: {
+  label: string;
+  host: string;
+  reach: Reach;
+  depth: number;
+}) {
   const color = reach === 'up' ? COL.up : reach === 'down' ? COL.down : COL.checking;
   const word = reach === 'up' ? 'online' : reach === 'down' ? 'offline' : 'checking';
 
@@ -128,8 +168,8 @@ function StatusRow({ host, reach, depth }: { host: HostCheck; reach: Reach; dept
       )}
       <View style={[styles.dot, { backgroundColor: color }]} />
       <View style={styles.statusText}>
-        <Text style={styles.statusLabel}>{host.label}</Text>
-        <Text style={styles.statusIp}>{host.host}</Text>
+        <Text style={styles.statusLabel}>{label}</Text>
+        <Text style={styles.statusIp}>{host}</Text>
       </View>
       <Text style={[styles.statusWord, { color }]}>{word}</Text>
     </View>
