@@ -6,15 +6,18 @@
     "@expo/vector-icons": "^15.0.2",
     "buffer": "^6.0.3",
     "expo": "~56.0.12",
+    "expo-file-system": "~56.0.8",
     "expo-haptics": "~56.0.3",
     "expo-linear-gradient": "~56.0.4",
     "expo-status-bar": "~56.0.4",
     "react": "19.2.3",
     "react-native": "0.85.3",
+    "react-native-svg": "15.15.4",
     "react-native-tcp-socket": "^6.4.1"
   },
   "devDependencies": {
     "@types/react": "~19.2.2",
+    "sharp": "^0.35.1",
     "typescript": "~6.0.3"
   },
   "scripts": {

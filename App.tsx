@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Pressable,
@@ -9,10 +10,12 @@ import { StatusBar } from 'expo-status-bar';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Feather } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
+import Svg, { Circle } from 'react-native-svg';
 
 import { ENERGY_UNIT, NAS, PING_HOSTS } from './src/config';
 import { usePlug } from './src/usePlug';
 import { useReachability, type Reach } from './src/useReachability';
+import { useHistory } from './src/useHistory';
 
 const COL = {
   bgTop: '#10131a',
@@ -31,26 +34,38 @@ const COL = {
   checking: '#fbbf24',
 };
 
+const TOGGLE_SIZE = 200;
+
 export default function App() {
   const { nas, connected, state, energy, pending, toggle } = usePlug();
   const reach = useReachability();
-
   const vmUp = reach[PING_HOSTS[1].key] === 'up';
+
   const offline = nas === 'down'; // can't reach the broker / NAS at all
   const ready = connected && state !== null;
   const isOn = state === 'on';
   const booting = ready && isOn && !vmUp; // plug on, VM not reachable yet
 
-  // The big control is only "green / Server on" once the VM is actually up.
-  const ringColor = !ready
-    ? COL.muted
-    : isOn
-      ? vmUp
-        ? COL.on
-        : COL.booting
-      : COL.off;
+  const { averageBootSeconds, bootStartedAt } = useHistory({ energy, state, vmUp });
 
-  const showSpinner = !offline && (!ready || pending || booting);
+  // Tick while booting so the clock ring + countdown advance.
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  useEffect(() => {
+    if (!booting) return;
+    setNowMs(Date.now());
+    const id = setInterval(() => setNowMs(Date.now()), 500);
+    return () => clearInterval(id);
+  }, [booting]);
+
+  const avgMs = averageBootSeconds != null ? averageBootSeconds * 1000 : null;
+  const bootElapsed = bootStartedAt != null ? Math.max(0, nowMs - bootStartedAt) : 0;
+  // Ring fills over the average boot time; stays full when no average is known.
+  const bootProgress = avgMs ? Math.min(1, bootElapsed / avgMs) : 1;
+  const remainingSec = avgMs ? Math.max(0, Math.ceil((avgMs - bootElapsed) / 1000)) : null;
+  const countdown = remainingSec != null ? formatCountdown(remainingSec) : null;
+
+  const ringColor = !ready ? COL.muted : isOn ? (vmUp ? COL.on : COL.booting) : COL.off;
+  const showSpinner = !offline && !booting && (!ready || pending);
 
   const stateWord = offline
     ? 'Offline'
@@ -98,13 +113,20 @@ export default function App() {
           style={({ pressed }) => [
             styles.toggle,
             {
-              borderColor: withAlpha(ringColor, 0.55),
+              borderColor: booting ? 'transparent' : withAlpha(ringColor, 0.55),
               backgroundColor: withAlpha(ringColor, 0.07),
               transform: [{ scale: pressed ? 0.97 : 1 }],
             },
           ]}
         >
-          {showSpinner ? (
+          {booting && <BootRing size={TOGGLE_SIZE} stroke={5} progress={bootProgress} color={COL.booting} />}
+          {booting ? (
+            countdown ? (
+              <Text style={styles.countdown}>{countdown}</Text>
+            ) : (
+              <Feather name="power" size={64} color={COL.booting} />
+            )
+          ) : showSpinner ? (
             <ActivityIndicator color={ringColor} size="large" />
           ) : (
             <Feather name="power" size={66} color={ringColor} />
@@ -145,6 +167,41 @@ export default function App() {
   );
 }
 
+function BootRing({
+  size,
+  stroke,
+  progress,
+  color,
+}: {
+  size: number;
+  stroke: number;
+  progress: number;
+  color: string;
+}) {
+  const center = size / 2;
+  const r = (size - stroke) / 2;
+  const circumference = 2 * Math.PI * r;
+  const clamped = Math.max(0, Math.min(1, progress));
+  const offset = circumference * (1 - clamped);
+  return (
+    <Svg width={size} height={size} style={StyleSheet.absoluteFill}>
+      <Circle cx={center} cy={center} r={r} stroke={withAlpha(color, 0.18)} strokeWidth={stroke} fill="none" />
+      <Circle
+        cx={center}
+        cy={center}
+        r={r}
+        stroke={color}
+        strokeWidth={stroke}
+        fill="none"
+        strokeDasharray={circumference}
+        strokeDashoffset={offset}
+        strokeLinecap="round"
+        transform={`rotate(-90 ${center} ${center})`}
+      />
+    </Svg>
+  );
+}
+
 function StatusRow({
   label,
   host,
@@ -177,6 +234,16 @@ function StatusRow({
       <Text style={[styles.statusWord, { color }]}>{word}</Text>
     </View>
   );
+}
+
+/** "1:05" for >= 60s, otherwise "42s". */
+function formatCountdown(totalSec: number): string {
+  if (totalSec >= 60) {
+    const m = Math.floor(totalSec / 60);
+    const s = totalSec % 60;
+    return `${m}:${String(s).padStart(2, '0')}`;
+  }
+  return `${totalSec}s`;
 }
 
 /** Apply an alpha channel to a #rrggbb hex color. */
@@ -216,12 +283,18 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   toggle: {
-    width: 200,
-    height: 200,
-    borderRadius: 100,
+    width: TOGGLE_SIZE,
+    height: TOGGLE_SIZE,
+    borderRadius: TOGGLE_SIZE / 2,
     borderWidth: 1.5,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  countdown: {
+    color: COL.booting,
+    fontSize: 38,
+    fontWeight: '600',
+    fontVariant: ['tabular-nums'],
   },
   stateWord: {
     color: COL.textPrimary,
