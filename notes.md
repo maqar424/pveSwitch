@@ -1,0 +1,7 @@
+- implement average boot up time. then display that inside the boot button
+- pricing menu opens when you click on the price (currency instead of power displayed), also second plug for nas
+- safe shut down of pve via "ssh user@proxmox-ip "sudo shutdown -h now", implemeant the ssh connection
+- add add icon
+- if tailscale isnt connected: "Connect via Tailscale" is a hyperlink to open the app.
+- data such as average boot/shut down time and energy consumption should be saved in a separate file
+- implement settings menu where all the ip adresses and other variables can be edited

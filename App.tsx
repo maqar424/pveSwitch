@@ -36,6 +36,7 @@ export default function App() {
   const reach = useReachability();
 
   const vmUp = reach[PING_HOSTS[1].key] === 'up';
+  const offline = nas === 'down'; // can't reach the broker / NAS at all
   const ready = connected && state !== null;
   const isOn = state === 'on';
   const booting = ready && isOn && !vmUp; // plug on, VM not reachable yet
@@ -49,19 +50,21 @@ export default function App() {
         : COL.booting
       : COL.off;
 
-  const showSpinner = !ready || pending || booting;
+  const showSpinner = !offline && (!ready || pending || booting);
 
-  const stateWord = !connected
-    ? 'Connecting'
-    : state === null
-      ? 'Reading state'
-      : pending
-        ? 'Switching'
-        : isOn
-          ? vmUp
-            ? 'Server on'
-            : 'Booting…'
-          : 'Server off';
+  const stateWord = offline
+    ? 'Offline'
+    : !connected
+      ? 'Connecting'
+      : state === null
+        ? 'Reading state'
+        : pending
+          ? 'Switching'
+          : isOn
+            ? vmUp
+              ? 'Server on'
+              : 'Booting…'
+            : 'Server off';
 
   const tapHint =
     ready && !pending ? (isOn ? 'Tap to turn off' : 'Tap to turn on') : ' ';
@@ -125,7 +128,7 @@ export default function App() {
         {nas === 'down' && (
           <View style={styles.hint}>
             <Feather name="alert-triangle" size={13} color={COL.checking} />
-            <Text style={styles.hintText}>Can&rsquo;t reach your network — turn on Tailscale.</Text>
+            <Text style={styles.hintText}>Can&rsquo;t reach your network — connect via Tailscale.</Text>
           </View>
         )}
         {rows.map((row) => (

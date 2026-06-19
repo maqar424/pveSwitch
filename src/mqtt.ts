@@ -47,6 +47,7 @@ function encodeString(value: string): Buffer {
 const PINGREQ = Buffer.from([0xc0, 0x00]);
 const DISCONNECT = Buffer.from([0xe0, 0x00]);
 const RECONNECT_DELAY_MS = 3000;
+const CONNECT_TIMEOUT_MS = 6000; // abort & retry if the handshake stalls (e.g. Tailscale off)
 
 export class MqttClient {
   private socket?: Socket;
@@ -56,6 +57,7 @@ export class MqttClient {
   private closedByUser = false;
   private pingTimer?: ReturnType<typeof setInterval>;
   private reconnectTimer?: ReturnType<typeof setTimeout>;
+  private connectTimer?: ReturnType<typeof setTimeout>;
 
   constructor(
     private readonly options: MqttOptions,
@@ -65,17 +67,30 @@ export class MqttClient {
   connect(): void {
     this.closedByUser = false;
     this.teardownSocket();
+    this.stopConnectTimer();
     this.buffer = Buffer.alloc(0);
 
     const clientId = `pveswitch-${Math.random().toString(16).slice(2, 10)}`;
-    const socket = TcpSocket.createConnection(
-      { host: this.options.host, port: this.options.port },
-      () => socket.write(this.buildConnect(clientId)),
-    );
-    this.socket = socket;
-    socket.on('data', (data: unknown) => this.onData(data as Buffer | string));
-    socket.on('error', () => this.handleDrop());
-    socket.on('close', () => this.handleDrop());
+    try {
+      const socket = TcpSocket.createConnection(
+        { host: this.options.host, port: this.options.port },
+        () => socket.write(this.buildConnect(clientId)),
+      );
+      this.socket = socket;
+      socket.on('data', (data: unknown) => this.onData(data as Buffer | string));
+      socket.on('error', () => this.handleDrop());
+      socket.on('close', () => this.handleDrop());
+    } catch {
+      // createConnection can throw synchronously when the network is down.
+      this.scheduleReconnect();
+      return;
+    }
+
+    // If the TCP connect / MQTT handshake stalls (e.g. Tailscale is off and the
+    // socket never errors), abort and retry so we recover without a restart.
+    this.connectTimer = setTimeout(() => {
+      if (!this.connected) this.handleDrop();
+    }, CONNECT_TIMEOUT_MS);
   }
 
   disconnect(): void {
@@ -121,15 +136,19 @@ export class MqttClient {
     if (!this.socket) return; // already handled
     const wasConnected = this.connected;
     this.connected = false;
+    this.stopConnectTimer();
     this.teardownSocket();
     this.stopPing();
     if (wasConnected) this.handlers.onDisconnect?.();
-    if (!this.closedByUser && !this.reconnectTimer) {
-      this.reconnectTimer = setTimeout(() => {
-        this.reconnectTimer = undefined;
-        this.connect();
-      }, RECONNECT_DELAY_MS);
-    }
+    this.scheduleReconnect();
+  }
+
+  private scheduleReconnect(): void {
+    if (this.closedByUser || this.reconnectTimer) return;
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = undefined;
+      this.connect();
+    }, RECONNECT_DELAY_MS);
   }
 
   private teardownSocket(): void {
@@ -155,8 +174,16 @@ export class MqttClient {
     }
   }
 
+  private stopConnectTimer(): void {
+    if (this.connectTimer) {
+      clearTimeout(this.connectTimer);
+      this.connectTimer = undefined;
+    }
+  }
+
   private stopTimers(): void {
     this.stopPing();
+    this.stopConnectTimer();
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = undefined;
@@ -212,6 +239,7 @@ export class MqttClient {
       // CONNACK: body = [ackFlags, returnCode]
       if (body.length >= 2 && body[1] === 0) {
         this.connected = true;
+        this.stopConnectTimer();
         this.startPing();
         this.handlers.onConnect?.();
       } else {
