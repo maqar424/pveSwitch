@@ -152,22 +152,22 @@ export default function App() {
         <Text style={styles.stateWord}>{stateWord}</Text>
         <Text style={styles.tapHint}>{tapHint}</Text>
 
-        {offline ? (
+        <Pressable
+          onPress={onOpenEnergy}
+          style={({ pressed }) => [styles.energy, { opacity: pressed ? 0.7 : 1 }]}
+        >
+          <Feather name="bar-chart-2" size={13} color={COL.textTertiary} />
+          <Text style={styles.energyText}>{formatValue(totalCost, 'cost', data.currency)}</Text>
+          <Feather name="chevron-right" size={14} color={COL.textTertiary} />
+        </Pressable>
+
+        {offline && (
           <Pressable
             onPress={onRetry}
             style={({ pressed }) => [styles.retry, { opacity: pressed ? 0.7 : 1 }]}
           >
             <Feather name="refresh-cw" size={14} color={COL.textPrimary} />
             <Text style={styles.retryText}>Retry connecting</Text>
-          </Pressable>
-        ) : (
-          <Pressable
-            onPress={onOpenEnergy}
-            style={({ pressed }) => [styles.energy, { opacity: pressed ? 0.7 : 1 }]}
-          >
-            <Feather name="bar-chart-2" size={13} color={COL.textTertiary} />
-            <Text style={styles.energyText}>{formatValue(totalCost, 'cost', data.currency)}</Text>
-            <Feather name="chevron-right" size={14} color={COL.textTertiary} />
           </Pressable>
         )}
       </View>
@@ -363,7 +363,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    marginTop: 18,
+    marginTop: 12,
     paddingVertical: 9,
     paddingHorizontal: 16,
     borderRadius: 999,

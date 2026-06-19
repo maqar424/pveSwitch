@@ -11,6 +11,7 @@ import {
 import { Feather } from '@expo/vector-icons';
 
 import { LineChart, Segmented, StackedBarChart } from './charts';
+import { DatePicker } from './DatePicker';
 import {
   buildBuckets,
   formatNumber,
@@ -20,7 +21,7 @@ import {
   type Duration,
   type Metric,
 } from './aggregate';
-import { dayKey, type PveData } from './storage';
+import { type PveData } from './storage';
 
 type Viz = 'line' | 'bar';
 
@@ -37,8 +38,8 @@ export function EnergyModal({
   visible: boolean;
   onClose: () => void;
   data: PveData;
-  addPrice: (from: string, price: number) => void;
-  removePrice: (from: string) => void;
+  addPrice: (start: string | null, end: string | null, price: number) => void;
+  removePrice: (id: string) => void;
   setCurrency: (currency: string) => void;
 }) {
   const [metric, setMetric] = useState<Metric>('cost');
@@ -46,7 +47,9 @@ export function EnergyModal({
   const [viz, setViz] = useState<Viz>('line');
 
   const [priceInput, setPriceInput] = useState('');
-  const [dateInput, setDateInput] = useState(dayKey());
+  const [startDate, setStartDate] = useState<string | null>(null);
+  const [endDate, setEndDate] = useState<string | null>(null);
+  const [pickerMode, setPickerMode] = useState<'start' | 'end' | null>(null);
 
   const now = new Date();
   const prefix =
@@ -63,8 +66,8 @@ export function EnergyModal({
   const onAdd = () => {
     const p = parseFloat(priceInput.replace(',', '.'));
     if (!Number.isFinite(p) || p < 0) return;
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(dateInput)) return;
-    addPrice(dateInput, p);
+    if (startDate && endDate && startDate > endDate) return; // invalid range
+    addPrice(startDate, endDate, p);
     setPriceInput('');
   };
 
@@ -144,22 +147,20 @@ export function EnergyModal({
               </View>
             </View>
 
+            <View style={styles.dateRow}>
+              <DateField label="Start" display={startDate ?? 'Beginning'} onPress={() => setPickerMode('start')} />
+              <Feather name="arrow-right" size={16} color={C.textTertiary} />
+              <DateField label="End" display={endDate ?? 'Current'} onPress={() => setPickerMode('end')} />
+            </View>
+
             <View style={styles.addRow}>
-              <TextInput
-                value={dateInput}
-                onChangeText={setDateInput}
-                placeholder="YYYY-MM-DD"
-                placeholderTextColor={C.textTertiary}
-                style={[styles.input, styles.dateInput]}
-                autoCapitalize="none"
-              />
               <TextInput
                 value={priceInput}
                 onChangeText={setPriceInput}
                 placeholder={`0,30 ${currency}`}
                 placeholderTextColor={C.textTertiary}
                 keyboardType="decimal-pad"
-                style={[styles.input, styles.priceInput]}
+                style={styles.priceInput}
               />
               <Pressable onPress={onAdd} style={styles.addBtn}>
                 <Feather name="plus" size={18} color="#0b0d12" />
@@ -170,14 +171,16 @@ export function EnergyModal({
               <Text style={styles.noPrices}>No prices set — costs show as 0 until you add one.</Text>
             ) : (
               [...data.prices]
-                .sort((a, b) => (a.from < b.from ? 1 : -1))
+                .sort((a, b) => (a.start ?? '').localeCompare(b.start ?? ''))
                 .map((p) => (
-                  <View key={p.from} style={styles.priceRow}>
-                    <Text style={styles.priceFrom}>from {p.from}</Text>
-                    <Text style={styles.priceValue}>
-                      {formatNumber(p.price)} {currency}/kWh
+                  <View key={p.id} style={styles.priceRow}>
+                    <Text style={styles.priceFrom}>
+                      {(p.start ?? 'Beginning') + ' → ' + (p.end ?? 'Current')}
                     </Text>
-                    <Pressable onPress={() => removePrice(p.from)} hitSlop={8}>
+                    <Text style={styles.priceValue}>
+                      {formatNumber(p.price)} {currency}
+                    </Text>
+                    <Pressable onPress={() => removePrice(p.id)} hitSlop={8}>
                       <Feather name="trash-2" size={16} color={C.textTertiary} />
                     </Pressable>
                   </View>
@@ -185,8 +188,41 @@ export function EnergyModal({
             )}
           </ScrollView>
         </View>
+
+        {pickerMode && (
+          <DatePicker
+            value={pickerMode === 'start' ? startDate : endDate}
+            openEndedLabel={pickerMode === 'start' ? 'Beginning' : 'Current'}
+            onSelect={(v) => {
+              if (pickerMode === 'start') setStartDate(v);
+              else setEndDate(v);
+              setPickerMode(null);
+            }}
+            onClose={() => setPickerMode(null)}
+          />
+        )}
       </View>
     </Modal>
+  );
+}
+
+function DateField({
+  label,
+  display,
+  onPress,
+}: {
+  label: string;
+  display: string;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable style={styles.dateField} onPress={onPress}>
+      <Text style={styles.dateLabel}>{label}</Text>
+      <View style={styles.dateValueRow}>
+        <Feather name="calendar" size={14} color={C.textSecondary} />
+        <Text style={styles.dateValue}>{display}</Text>
+      </View>
+    </Pressable>
   );
 }
 
@@ -338,12 +374,43 @@ const styles = StyleSheet.create({
     minWidth: 46,
     textAlign: 'center',
   },
+  dateRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  dateField: {
+    flex: 1,
+    backgroundColor: C.surface,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: C.border,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    gap: 3,
+  },
+  dateLabel: {
+    color: C.textTertiary,
+    fontSize: 11,
+  },
+  dateValueRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  dateValue: {
+    color: C.textPrimary,
+    fontSize: 14,
+    fontWeight: '500',
+    fontVariant: ['tabular-nums'],
+  },
   addRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
   },
-  input: {
+  priceInput: {
+    flex: 1,
     backgroundColor: C.surface,
     borderRadius: 10,
     borderWidth: 1,
@@ -352,13 +419,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
     paddingHorizontal: 12,
     paddingVertical: 10,
-  },
-  dateInput: {
-    flex: 1.4,
-    fontVariant: ['tabular-nums'],
-  },
-  priceInput: {
-    flex: 1,
     fontVariant: ['tabular-nums'],
   },
   addBtn: {

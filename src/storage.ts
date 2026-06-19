@@ -7,7 +7,14 @@ import { File, Paths } from 'expo-file-system';
 import { DEFAULT_CURRENCY } from './config';
 
 const FILE_NAME = 'pveswitch-data.json';
-const DATA_VERSION = 2;
+const DATA_VERSION = 3;
+
+let idCounter = 0;
+/** Small unique id for price entries. */
+export function genId(): string {
+  idCounter += 1;
+  return `${Date.now().toString(36)}-${idCounter.toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
+}
 
 export interface EnergySeries {
   /** Last cumulative reading (kWh) — the baseline for the next delta. */
@@ -18,9 +25,14 @@ export interface EnergySeries {
   byDay: Record<string, number>;
 }
 
-/** A kWh price valid from `from` (inclusive) until the next entry's date. */
+/**
+ * A kWh price valid over a date range (inclusive). `start === null` means "since
+ * the very beginning"; `end === null` means "current" (ongoing).
+ */
 export interface PriceEntry {
-  from: string; // 'YYYY-MM-DD'
+  id: string;
+  start: string | null; // 'YYYY-MM-DD' or null
+  end: string | null; // 'YYYY-MM-DD' or null
   price: number; // currency per kWh
 }
 
@@ -72,20 +84,45 @@ export function dayKeysFromTo(startISO: string, end: Date = new Date()): string[
   return keys.length > 0 ? keys : [dayKey(e)];
 }
 
+/** Accept both the old `{from, price}` and the new `{start, end, price}` shapes. */
+function normalizePrices(arr: unknown): PriceEntry[] {
+  if (!Array.isArray(arr)) return [];
+  const out: PriceEntry[] = [];
+  for (const item of arr) {
+    if (!item || typeof item !== 'object') continue;
+    const e = item as Record<string, any>;
+    const price = Number(e.price);
+    if (!Number.isFinite(price)) continue;
+    if ('start' in e || 'end' in e) {
+      out.push({
+        id: typeof e.id === 'string' ? e.id : genId(),
+        start: e.start ?? null,
+        end: e.end ?? null,
+        price,
+      });
+    } else if ('from' in e) {
+      out.push({ id: genId(), start: e.from ?? null, end: null, price });
+    }
+  }
+  return out;
+}
+
 function migrate(parsed: unknown): PveData {
   const base = emptyData();
   if (!parsed || typeof parsed !== 'object') return base;
   const p = parsed as Record<string, any>;
 
-  if (p.version === DATA_VERSION && p.pve && p.nas) {
+  // v2/v3 share the same series shape; only the price model changed (handled
+  // by normalizePrices). Detect by the presence of the energy series.
+  if (p.pve && p.nas) {
     return {
       ...base,
-      ...p,
       pve: { ...emptySeries(), ...p.pve },
       nas: { ...emptySeries(), ...p.nas },
-      prices: Array.isArray(p.prices) ? p.prices : [],
       bootTimes: Array.isArray(p.bootTimes) ? p.bootTimes : [],
+      prices: normalizePrices(p.prices),
       currency: typeof p.currency === 'string' ? p.currency : DEFAULT_CURRENCY,
+      version: DATA_VERSION,
     };
   }
 

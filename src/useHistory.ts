@@ -14,8 +14,10 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   dayKey,
   dayKeysFromTo,
+  genId,
   loadData,
   saveData,
+  type PriceEntry,
   type PveData,
 } from './storage';
 import type { PlugState } from './usePlug';
@@ -27,8 +29,8 @@ export interface HistoryApi {
   data: PveData;
   averageBootSeconds: number | null;
   bootStartedAt: number | null;
-  addPrice: (from: string, price: number) => void;
-  removePrice: (from: string) => void;
+  addPrice: (start: string | null, end: string | null, price: number) => void;
+  removePrice: (id: string) => void;
   setCurrency: (currency: string) => void;
 }
 
@@ -131,20 +133,18 @@ export function useHistory(params: {
   }, [state, vmUp, commit]);
 
   const addPrice = useCallback(
-    (from: string, price: number) => {
+    (start: string | null, end: string | null, price: number) => {
       const d = dataRef.current;
-      const prices = [...d.prices.filter((p) => p.from !== from), { from, price }].sort((a, b) =>
-        a.from < b.from ? -1 : a.from > b.from ? 1 : 0,
-      );
-      commit({ ...d, prices });
+      const entry: PriceEntry = { id: genId(), start, end, price };
+      commit({ ...d, prices: [...d.prices, entry] });
     },
     [commit],
   );
 
   const removePrice = useCallback(
-    (from: string) => {
+    (id: string) => {
       const d = dataRef.current;
-      commit({ ...d, prices: d.prices.filter((p) => p.from !== from) });
+      commit({ ...d, prices: d.prices.filter((p) => p.id !== id) });
     },
     [commit],
   );

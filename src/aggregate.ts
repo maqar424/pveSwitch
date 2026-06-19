@@ -18,14 +18,20 @@ const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', '
 
 const pad2 = (n: number) => String(n).padStart(2, '0');
 
-/** Price per kWh valid on `day` (prices assumed sorted ascending by `from`). */
+/**
+ * Price per kWh valid on `day`. An entry applies when its [start, end] range
+ * contains the day (null start = since the beginning, null end = ongoing). If
+ * several ranges overlap, the one with the latest start wins.
+ */
 export function priceAt(prices: PriceEntry[], day: string): number {
-  let price = 0;
-  for (const entry of prices) {
-    if (entry.from <= day) price = entry.price;
-    else break;
+  let best: PriceEntry | null = null;
+  for (const e of prices) {
+    const startOk = e.start === null || e.start <= day;
+    const endOk = e.end === null || day <= e.end;
+    if (!startOk || !endOk) continue;
+    if (!best || (e.start ?? '') >= (best.start ?? '')) best = e;
   }
-  return price;
+  return best ? best.price : 0;
 }
 
 function dayValue(
