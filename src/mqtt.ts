@@ -107,6 +107,14 @@ export class MqttClient {
     this.connected = false;
   }
 
+  /** Force a fresh connection attempt now (used by the manual retry button). */
+  reconnect(): void {
+    this.stopTimers();
+    this.teardownSocket();
+    this.connected = false;
+    this.connect();
+  }
+
   publish(topic: string, message: string): boolean {
     if (!this.socket || !this.connected) return false;
     try {

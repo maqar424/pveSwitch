@@ -37,7 +37,7 @@ const COL = {
 const TOGGLE_SIZE = 200;
 
 export default function App() {
-  const { nas, connected, state, energy, pending, toggle } = usePlug();
+  const { nas, connected, state, energy, pending, toggle, reconnect } = usePlug();
   const reach = useReachability();
   const vmUp = reach[PING_HOSTS[1].key] === 'up';
 
@@ -46,7 +46,7 @@ export default function App() {
   const isOn = state === 'on';
   const booting = ready && isOn && !vmUp; // plug on, VM not reachable yet
 
-  const { averageBootSeconds, bootStartedAt } = useHistory({ energy, state, vmUp });
+  const { averageBootSeconds, bootStartedAt, consumptionKWh } = useHistory({ energy, state, vmUp });
 
   // Tick while booting so the clock ring + countdown advance.
   const [nowMs, setNowMs] = useState(() => Date.now());
@@ -88,6 +88,11 @@ export default function App() {
     if (!ready || pending) return;
     Haptics.selectionAsync();
     toggle();
+  };
+
+  const onRetry = () => {
+    Haptics.selectionAsync();
+    reconnect();
   };
 
   const rows = [
@@ -136,14 +141,22 @@ export default function App() {
         <Text style={styles.stateWord}>{stateWord}</Text>
         <Text style={styles.tapHint}>{tapHint}</Text>
 
-        {energy !== null && (
+        {offline ? (
+          <Pressable
+            onPress={onRetry}
+            style={({ pressed }) => [styles.retry, { opacity: pressed ? 0.7 : 1 }]}
+          >
+            <Feather name="refresh-cw" size={14} color={COL.textPrimary} />
+            <Text style={styles.retryText}>Retry connecting</Text>
+          </Pressable>
+        ) : energy !== null ? (
           <View style={styles.energy}>
             <Feather name="zap" size={12} color={COL.textTertiary} />
             <Text style={styles.energyText}>
-              {energy.toFixed(2)} {ENERGY_UNIT}
+              {consumptionKWh.toFixed(2)} {ENERGY_UNIT}
             </Text>
           </View>
-        )}
+        ) : null}
       </View>
 
       <View style={styles.statusCard}>
@@ -323,6 +336,23 @@ const styles = StyleSheet.create({
     color: COL.textSecondary,
     fontSize: 13,
     fontVariant: ['tabular-nums'],
+  },
+  retry: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 18,
+    paddingVertical: 9,
+    paddingHorizontal: 16,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: 'rgba(154,163,178,0.3)',
+    backgroundColor: COL.card,
+  },
+  retryText: {
+    color: COL.textPrimary,
+    fontSize: 14,
+    fontWeight: '500',
   },
   statusCard: {
     backgroundColor: COL.card,

@@ -1,9 +1,10 @@
 /**
  * Owns the persistent MQTT connection and exposes the plug's live state, its
- * latest energy reading, NAS reachability (derived from the connection), and a
- * single `toggle()` that flips it.
+ * latest energy reading, NAS reachability (derived from the connection), a
+ * single `toggle()`, and a manual `reconnect()`.
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { AppState } from 'react-native';
 import { MqttClient } from './mqtt';
 import { BROKER, GET_TOPIC, SET_TOPIC, STATE_TOPIC } from './config';
 import type { Reach } from './useReachability';
@@ -21,6 +22,8 @@ export interface PlugApi {
   energy: number | null;
   pending: boolean;
   toggle: () => void;
+  /** Force a fresh connection attempt now. */
+  reconnect: () => void;
 }
 
 export function usePlug(): PlugApi {
@@ -33,14 +36,19 @@ export function usePlug(): PlugApi {
   const clientRef = useRef<MqttClient | null>(null);
   const pendingTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const graceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const connectedRef = useRef(false);
 
   useEffect(() => {
-    const startGrace = () => {
-      if (graceTimer.current) clearTimeout(graceTimer.current);
-      setNasChecking(true);
-      graceTimer.current = setTimeout(() => setNasChecking(false), NAS_GRACE_MS);
-    };
+    connectedRef.current = connected;
+  }, [connected]);
 
+  const startGrace = useCallback(() => {
+    if (graceTimer.current) clearTimeout(graceTimer.current);
+    setNasChecking(true);
+    graceTimer.current = setTimeout(() => setNasChecking(false), NAS_GRACE_MS);
+  }, []);
+
+  useEffect(() => {
     startGrace();
 
     const client = new MqttClient(
@@ -80,7 +88,18 @@ export function usePlug(): PlugApi {
       if (pendingTimer.current) clearTimeout(pendingTimer.current);
       if (graceTimer.current) clearTimeout(graceTimer.current);
     };
-  }, []);
+  }, [startGrace]);
+
+  // Returning to the foreground (e.g. after enabling Tailscale) -> reconnect.
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (next) => {
+      if (next === 'active' && !connectedRef.current) {
+        startGrace();
+        clientRef.current?.reconnect();
+      }
+    });
+    return () => sub.remove();
+  }, [startGrace]);
 
   // Once the broker confirms a new state, the command is no longer pending.
   useEffect(() => {
@@ -110,7 +129,12 @@ export function usePlug(): PlugApi {
     pendingTimer.current = setTimeout(() => setPending(false), 6000);
   }, [connected, state, pending]);
 
+  const reconnect = useCallback(() => {
+    startGrace();
+    clientRef.current?.reconnect();
+  }, [startGrace]);
+
   const nas: Reach = connected ? 'up' : nasChecking ? 'checking' : 'down';
 
-  return { nas, connected, state, energy, pending, toggle };
+  return { nas, connected, state, energy, pending, toggle, reconnect };
 }

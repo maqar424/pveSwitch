@@ -21,9 +21,13 @@ export interface HistoryApi {
   averageBootSeconds: number | null;
   /** Timestamp (ms) the current boot began, or null when not booting. */
   bootStartedAt: number | null;
+  /** Total energy consumed since tracking began (kWh) — sum of all deltas. */
+  consumptionKWh: number;
 }
 
 const average = (xs: number[]): number => xs.reduce((a, b) => a + b, 0) / xs.length;
+const sumDeltas = (data: PveData): number =>
+  Object.values(data.energyByDay).reduce((a, b) => a + b, 0);
 
 export function useHistory(params: {
   energy: number | null;
@@ -35,6 +39,7 @@ export function useHistory(params: {
   const dataRef = useRef<PveData | null>(null);
   const [averageBootSeconds, setAverageBootSeconds] = useState<number | null>(null);
   const [bootStartedAt, setBootStartedAt] = useState<number | null>(null);
+  const [consumptionKWh, setConsumptionKWh] = useState(0);
 
   const prevState = useRef<PlugState>(null);
   const prevVmUp = useRef<boolean>(false);
@@ -46,6 +51,7 @@ export function useHistory(params: {
     const data = loadData();
     dataRef.current = data;
     if (data.bootTimes.length > 0) setAverageBootSeconds(average(data.bootTimes));
+    setConsumptionKWh(sumDeltas(data));
   }, []);
 
   // Energy deltas.
@@ -63,6 +69,7 @@ export function useHistory(params: {
       data.energyByDay[key] = (data.energyByDay[key] ?? 0) + (energy - data.energyBaseline);
       data.energyBaseline = energy;
       saveData(data);
+      setConsumptionKWh(sumDeltas(data));
     } else if (energy < data.energyBaseline) {
       data.energyBaseline = energy; // counter reset on the device
       saveData(data);
@@ -106,5 +113,5 @@ export function useHistory(params: {
     prevVmUp.current = vmUp;
   }, [state, vmUp]);
 
-  return { averageBootSeconds, bootStartedAt };
+  return { averageBootSeconds, bootStartedAt, consumptionKWh };
 }
