@@ -16,12 +16,22 @@ export const BROKER = {
   port: 1883,
 } as const;
 
-/** Zigbee2MQTT topics for the pve switch. */
+/** Zigbee2MQTT topics for the pve switch (which we control). */
 export const SET_TOPIC = 'zigbee2mqtt/pveSwitch/set'; // publish {"state":"ON"|"OFF"}
 export const STATE_TOPIC = 'zigbee2mqtt/pveSwitch'; // device reports {"state":..,"energy":..}
 export const GET_TOPIC = 'zigbee2mqtt/pveSwitch/get'; // ask the device to report now
 
+/**
+ * nasSwitch is MONITOR-ONLY. We read its energy but must NEVER publish to a
+ * `…/set` topic for it — turning it off cuts power to the NAS, which kills the
+ * MQTT broker itself and makes remote recovery impossible. There is deliberately
+ * no NAS_SET_TOPIC constant so nothing can switch it off.
+ */
+export const NAS_STATE_TOPIC = 'zigbee2mqtt/nasSwitch';
+export const NAS_GET_TOPIC = 'zigbee2mqtt/nasSwitch/get';
+
 export const ENERGY_UNIT = 'kWh';
+export const DEFAULT_CURRENCY = '€';
 
 export interface PingHost extends DisplayHost {
   port: number;

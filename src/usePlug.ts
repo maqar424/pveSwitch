@@ -1,12 +1,23 @@
 /**
- * Owns the persistent MQTT connection and exposes the plug's live state, its
- * latest energy reading, NAS reachability (derived from the connection), a
- * single `toggle()`, and a manual `reconnect()`.
+ * Owns the persistent MQTT connection and exposes the pve plug's live state,
+ * both plugs' energy readings (pve + nas), NAS reachability, a single
+ * `toggle()`, and a manual `reconnect()`.
+ *
+ * Safety: this hook only ever publishes to the pve switch's SET topic. The NAS
+ * switch is subscribed/queried for energy but is NEVER sent a state command —
+ * switching it off would cut power to the NAS and the broker itself.
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { AppState } from 'react-native';
 import { MqttClient } from './mqtt';
-import { BROKER, GET_TOPIC, SET_TOPIC, STATE_TOPIC } from './config';
+import {
+  BROKER,
+  GET_TOPIC,
+  NAS_GET_TOPIC,
+  NAS_STATE_TOPIC,
+  SET_TOPIC,
+  STATE_TOPIC,
+} from './config';
 import type { Reach } from './useReachability';
 
 export type PlugState = 'on' | 'off' | null;
@@ -19,10 +30,10 @@ export interface PlugApi {
   nas: Reach;
   connected: boolean;
   state: PlugState;
-  energy: number | null;
+  pveEnergy: number | null;
+  nasEnergy: number | null;
   pending: boolean;
   toggle: () => void;
-  /** Force a fresh connection attempt now. */
   reconnect: () => void;
 }
 
@@ -30,7 +41,8 @@ export function usePlug(): PlugApi {
   const [connected, setConnected] = useState(false);
   const [nasChecking, setNasChecking] = useState(true);
   const [state, setState] = useState<PlugState>(null);
-  const [energy, setEnergy] = useState<number | null>(null);
+  const [pveEnergy, setPveEnergy] = useState<number | null>(null);
+  const [nasEnergy, setNasEnergy] = useState<number | null>(null);
   const [pending, setPending] = useState(false);
 
   const clientRef = useRef<MqttClient | null>(null);
@@ -59,21 +71,26 @@ export function usePlug(): PlugApi {
           setNasChecking(false);
           if (graceTimer.current) clearTimeout(graceTimer.current);
           client.subscribe(STATE_TOPIC);
-          // Ask the device to report its current state + energy right away.
+          client.subscribe(NAS_STATE_TOPIC);
+          // Ask both plugs to report their current state + energy right away.
           client.publish(GET_TOPIC, JSON.stringify({ state: '', energy: '' }));
+          client.publish(NAS_GET_TOPIC, JSON.stringify({ energy: '' }));
         },
         onDisconnect: () => {
           setConnected(false);
           startGrace();
         },
         onMessage: (topic, payload) => {
-          if (topic !== STATE_TOPIC) return;
           try {
             const data = JSON.parse(payload.toString('utf8'));
-            if (data.state === 'ON' || data.state === 'OFF') {
-              setState(data.state === 'ON' ? 'on' : 'off');
+            if (topic === STATE_TOPIC) {
+              if (data.state === 'ON' || data.state === 'OFF') {
+                setState(data.state === 'ON' ? 'on' : 'off');
+              }
+              if (typeof data.energy === 'number') setPveEnergy(data.energy);
+            } else if (topic === NAS_STATE_TOPIC) {
+              if (typeof data.energy === 'number') setNasEnergy(data.energy);
             }
-            if (typeof data.energy === 'number') setEnergy(data.energy);
           } catch {
             // ignore malformed payloads
           }
@@ -116,13 +133,11 @@ export function usePlug(): PlugApi {
     setPending(true);
     clientRef.current?.publish(SET_TOPIC, JSON.stringify({ state: target }));
 
-    // After powering on, ask for a fresh energy reading shortly after.
-    if (target === 'ON') {
-      setTimeout(
-        () => clientRef.current?.publish(GET_TOPIC, JSON.stringify({ energy: '' })),
-        1500,
-      );
-    }
+    // Refresh pve energy on every toggle (on AND off) for accurate deltas.
+    setTimeout(
+      () => clientRef.current?.publish(GET_TOPIC, JSON.stringify({ energy: '' })),
+      1500,
+    );
 
     // Safety net: stop showing the spinner even if no report arrives.
     if (pendingTimer.current) clearTimeout(pendingTimer.current);
@@ -136,5 +151,5 @@ export function usePlug(): PlugApi {
 
   const nas: Reach = connected ? 'up' : nasChecking ? 'checking' : 'down';
 
-  return { nas, connected, state, energy, pending, toggle, reconnect };
+  return { nas, connected, state, pveEnergy, nasEnergy, pending, toggle, reconnect };
 }

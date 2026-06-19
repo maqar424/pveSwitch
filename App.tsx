@@ -12,10 +12,12 @@ import { Feather } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import Svg, { Circle } from 'react-native-svg';
 
-import { ENERGY_UNIT, NAS, PING_HOSTS } from './src/config';
+import { NAS, PING_HOSTS } from './src/config';
 import { usePlug } from './src/usePlug';
 import { useReachability, type Reach } from './src/useReachability';
 import { useHistory } from './src/useHistory';
+import { totals, formatValue } from './src/aggregate';
+import { EnergyModal } from './src/EnergyModal';
 
 const COL = {
   bgTop: '#10131a',
@@ -37,16 +39,21 @@ const COL = {
 const TOGGLE_SIZE = 200;
 
 export default function App() {
-  const { nas, connected, state, energy, pending, toggle, reconnect } = usePlug();
+  const { nas, connected, state, pveEnergy, nasEnergy, pending, toggle, reconnect } = usePlug();
   const reach = useReachability();
   const vmUp = reach[PING_HOSTS[1].key] === 'up';
 
-  const offline = nas === 'down'; // can't reach the broker / NAS at all
+  const offline = nas === 'down';
   const ready = connected && state !== null;
   const isOn = state === 'on';
-  const booting = ready && isOn && !vmUp; // plug on, VM not reachable yet
+  const booting = ready && isOn && !vmUp;
 
-  const { averageBootSeconds, bootStartedAt, consumptionKWh } = useHistory({ energy, state, vmUp });
+  const { data, averageBootSeconds, bootStartedAt, addPrice, removePrice, setCurrency } = useHistory(
+    { pveEnergy, nasEnergy, state, vmUp },
+  );
+  const totalCost = totals(data, 'cost').sum;
+
+  const [modalVisible, setModalVisible] = useState(false);
 
   // Tick while booting so the clock ring + countdown advance.
   const [nowMs, setNowMs] = useState(() => Date.now());
@@ -59,7 +66,6 @@ export default function App() {
 
   const avgMs = averageBootSeconds != null ? averageBootSeconds * 1000 : null;
   const bootElapsed = bootStartedAt != null ? Math.max(0, nowMs - bootStartedAt) : 0;
-  // Ring fills over the average boot time; stays full when no average is known.
   const bootProgress = avgMs ? Math.min(1, bootElapsed / avgMs) : 1;
   const remainingSec = avgMs ? Math.max(0, Math.ceil((avgMs - bootElapsed) / 1000)) : null;
   const countdown = remainingSec != null ? formatCountdown(remainingSec) : null;
@@ -93,6 +99,11 @@ export default function App() {
   const onRetry = () => {
     Haptics.selectionAsync();
     reconnect();
+  };
+
+  const onOpenEnergy = () => {
+    Haptics.selectionAsync();
+    setModalVisible(true);
   };
 
   const rows = [
@@ -149,14 +160,16 @@ export default function App() {
             <Feather name="refresh-cw" size={14} color={COL.textPrimary} />
             <Text style={styles.retryText}>Retry connecting</Text>
           </Pressable>
-        ) : energy !== null ? (
-          <View style={styles.energy}>
-            <Feather name="zap" size={12} color={COL.textTertiary} />
-            <Text style={styles.energyText}>
-              {consumptionKWh.toFixed(2)} {ENERGY_UNIT}
-            </Text>
-          </View>
-        ) : null}
+        ) : (
+          <Pressable
+            onPress={onOpenEnergy}
+            style={({ pressed }) => [styles.energy, { opacity: pressed ? 0.7 : 1 }]}
+          >
+            <Feather name="bar-chart-2" size={13} color={COL.textTertiary} />
+            <Text style={styles.energyText}>{formatValue(totalCost, 'cost', data.currency)}</Text>
+            <Feather name="chevron-right" size={14} color={COL.textTertiary} />
+          </Pressable>
+        )}
       </View>
 
       <View style={styles.statusCard}>
@@ -176,6 +189,15 @@ export default function App() {
           />
         ))}
       </View>
+
+      <EnergyModal
+        visible={modalVisible}
+        onClose={() => setModalVisible(false)}
+        data={data}
+        addPrice={addPrice}
+        removePrice={removePrice}
+        setCurrency={setCurrency}
+      />
     </View>
   );
 }
@@ -325,7 +347,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 6,
     marginTop: 18,
-    paddingVertical: 5,
+    paddingVertical: 6,
     paddingHorizontal: 12,
     borderRadius: 999,
     borderWidth: 1,
