@@ -23,6 +23,8 @@ import { useReachability, type Reach } from './src/useReachability';
 import { useHistory } from './src/useHistory';
 import { totals, formatValue } from './src/aggregate';
 import { EnergyModal } from './src/EnergyModal';
+import { useAppLock } from './src/useAppLock';
+import { LockScreen } from './src/LockScreen';
 
 const COL = {
   bgTop: '#10131a',
@@ -44,6 +46,7 @@ const COL = {
 const TOGGLE_SIZE = 200;
 
 export default function App() {
+  const { unlocked, authenticate } = useAppLock();
   const { nas, connected, state, pveEnergy, nasEnergy, pending, toggle, reconnect } = usePlug();
   const reach = useReachability();
   const vmUp = reach[PING_HOSTS[1].key] === 'up';
@@ -143,6 +146,10 @@ export default function App() {
     { label: PING_HOSTS[0].label, host: PING_HOSTS[0].host, reach: reach[PING_HOSTS[0].key], depth: 1 },
     { label: PING_HOSTS[1].label, host: PING_HOSTS[1].host, reach: reach[PING_HOSTS[1].key], depth: 2 },
   ];
+
+  if (!unlocked) {
+    return <LockScreen onUnlock={authenticate} />;
+  }
 
   return (
     <View style={styles.root}>

@@ -10,6 +10,7 @@
     "expo-haptics": "~56.0.3",
     "expo-intent-launcher": "~56.0.4",
     "expo-linear-gradient": "~56.0.4",
+    "expo-local-authentication": "~56.0.4",
     "expo-status-bar": "~56.0.4",
     "react": "19.2.3",
     "react-native": "0.85.3",
