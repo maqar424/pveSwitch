@@ -17,6 +17,7 @@ import Svg, { Circle } from 'react-native-svg';
 const AnimatedCircle = Animated.createAnimatedComponent(Circle);
 
 import { NAS, PING_HOSTS } from './src/config';
+import { openTailscale } from './src/tailscale';
 import { usePlug } from './src/usePlug';
 import { useReachability, type Reach } from './src/useReachability';
 import { useHistory } from './src/useHistory';
@@ -202,10 +203,20 @@ export default function App() {
 
       <View style={styles.statusCard}>
         {nas === 'down' && (
-          <View style={styles.hint}>
+          <Pressable
+            style={({ pressed }) => [styles.hint, { opacity: pressed ? 0.6 : 1 }]}
+            onPress={() => {
+              Haptics.selectionAsync();
+              void openTailscale();
+            }}
+          >
             <Feather name="alert-triangle" size={13} color={COL.checking} />
-            <Text style={styles.hintText}>Can&rsquo;t reach your network — connect via Tailscale.</Text>
-          </View>
+            <Text style={styles.hintText}>
+              Can&rsquo;t reach your network —{' '}
+              <Text style={styles.hintLink}>Click here to open Tailscale</Text>
+            </Text>
+            <Feather name="external-link" size={12} color={COL.checking} />
+          </Pressable>
         )}
         {rows.map((row) => (
           <StatusRow
@@ -423,7 +434,11 @@ const styles = StyleSheet.create({
   hintText: {
     color: COL.checking,
     fontSize: 13,
-    flexShrink: 1,
+    flex: 1,
+  },
+  hintLink: {
+    fontWeight: '600',
+    textDecorationLine: 'underline',
   },
   statusRow: {
     flexDirection: 'row',
