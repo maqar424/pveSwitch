@@ -8,6 +8,7 @@
     "expo": "~56.0.12",
     "expo-file-system": "~56.0.8",
     "expo-haptics": "~56.0.3",
+    "expo-intent-launcher": "~56.0.4",
     "expo-linear-gradient": "~56.0.4",
     "expo-status-bar": "~56.0.4",
     "react": "19.2.3",
