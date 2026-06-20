@@ -70,7 +70,6 @@ export default function App() {
     ssh: data.ssh,
     powerOff: () => setPower(false),
   });
-  const sshConfigured = data.ssh.password.trim().length > 0;
   const shuttingDown = shutdown.phase === 'sending' || shutdown.phase === 'waiting';
   const shutdownFailed = shutdown.phase === 'error';
   const shutdownActive = shuttingDown || shutdownFailed;
@@ -175,8 +174,8 @@ export default function App() {
     if (shutdownActive || !ready || pending) return;
     Haptics.selectionAsync();
     if (isOn) {
-      if (sshConfigured) void shutdown.start();
-      else setPower(false);
+      // Graceful SSH shutdown is deferred — off does a direct power cut for now.
+      setPower(false);
     } else {
       setPower(true);
     }

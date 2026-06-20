@@ -1,11 +1,12 @@
 /**
- * Sends the graceful shutdown command to pve over SSH. Tries each candidate IP
- * and uses the first that authenticates. Once connected, the command is sent
- * best-effort — `shutdown` often drops the SSH session as the system goes down,
- * so an `execute` error after a successful connect is not treated as a failure.
+ * Placeholder for the graceful SSH shutdown.
+ *
+ * The native SSH library (@dylankenneally/react-native-ssh-sftp) was removed
+ * because it would not build on Expo 56 / RN 0.85. For now the off action does a
+ * direct power cut; the shutdown flow, its on-screen states, and the stored SSH
+ * details are kept dormant so a working mechanism (e.g. the Proxmox API) can be
+ * dropped in here without rewiring the UI.
  */
-import SSHClient from '@dylankenneally/react-native-ssh-sftp';
-
 export interface ShutdownOptions {
   hosts: string[];
   port: number;
@@ -14,27 +15,6 @@ export interface ShutdownOptions {
   command: string;
 }
 
-export async function runRemoteShutdown(opts: ShutdownOptions): Promise<void> {
-  let lastError: unknown = null;
-
-  for (const host of opts.hosts) {
-    try {
-      const client = await SSHClient.connectWithPassword(host, opts.port, opts.user, opts.password);
-      try {
-        await client.execute(opts.command);
-      } catch {
-        // The shutdown may drop the SSH session mid-command — that's expected.
-      }
-      try {
-        client.disconnect();
-      } catch {
-        // ignore
-      }
-      return; // a host authenticated and the command was sent
-    } catch (e) {
-      lastError = e; // couldn't connect/auth on this host — try the next
-    }
-  }
-
-  throw lastError instanceof Error ? lastError : new Error('SSH connection failed');
+export async function runRemoteShutdown(_opts: ShutdownOptions): Promise<void> {
+  throw new Error('Graceful shutdown is not available in this build yet');
 }

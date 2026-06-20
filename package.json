@@ -3,7 +3,6 @@
   "version": "1.0.0",
   "main": "index.ts",
   "dependencies": {
-    "@dylankenneally/react-native-ssh-sftp": "^1.7.0",
     "@expo/vector-icons": "^15.0.2",
     "buffer": "^6.0.3",
     "crypto-js": "^4.2.0",
@@ -24,13 +23,10 @@
   "devDependencies": {
     "@types/crypto-js": "^4.2.2",
     "@types/react": "~19.2.2",
-    "patch-package": "^8.0.1",
-    "postinstall-postinstall": "^2.1.0",
     "sharp": "^0.35.1",
     "typescript": "~6.0.3"
   },
   "scripts": {
-    "postinstall": "patch-package",
     "start": "expo start",
     "android": "expo start --android",
     "ios": "expo start --ios",

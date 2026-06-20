@@ -10,7 +10,6 @@
     "newArchEnabled": false,
     "plugins": [
       "./plugins/withTailscaleQueries.js",
-      "./plugins/withSshNamespace.js",
       [
         "expo-local-authentication",
         {
