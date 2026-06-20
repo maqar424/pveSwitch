@@ -1,6 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Animated,
+  Easing,
   Pressable,
   StyleSheet,
   Text,
@@ -11,6 +13,8 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Feather } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import Svg, { Circle } from 'react-native-svg';
+
+const AnimatedCircle = Animated.createAnimatedComponent(Circle);
 
 import { NAS, PING_HOSTS } from './src/config';
 import { usePlug } from './src/usePlug';
@@ -55,18 +59,42 @@ export default function App() {
 
   const [modalVisible, setModalVisible] = useState(false);
 
-  // Tick while booting so the clock ring + countdown advance.
+  const avgMs = averageBootSeconds != null ? averageBootSeconds * 1000 : null;
+
+  // The ring fills smoothly via the native Animated API (animates one prop, no
+  // per-frame React re-renders). Full ring when there's no average yet.
+  const ringProgress = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    ringProgress.stopAnimation();
+    if (!booting) return;
+    if (avgMs == null) {
+      ringProgress.setValue(1);
+      return;
+    }
+    const elapsed = bootStartedAt != null ? Math.max(0, Date.now() - bootStartedAt) : 0;
+    const start = Math.min(1, elapsed / avgMs);
+    ringProgress.setValue(start);
+    const remaining = avgMs - elapsed;
+    if (remaining > 0 && start < 1) {
+      Animated.timing(ringProgress, {
+        toValue: 1,
+        duration: remaining,
+        easing: Easing.linear,
+        useNativeDriver: false,
+      }).start();
+    }
+  }, [booting, bootStartedAt, avgMs, ringProgress]);
+
+  // Once-per-second tick for the countdown text only.
   const [nowMs, setNowMs] = useState(() => Date.now());
   useEffect(() => {
     if (!booting) return;
     setNowMs(Date.now());
-    const id = setInterval(() => setNowMs(Date.now()), 500);
+    const id = setInterval(() => setNowMs(Date.now()), 1000);
     return () => clearInterval(id);
   }, [booting]);
 
-  const avgMs = averageBootSeconds != null ? averageBootSeconds * 1000 : null;
   const bootElapsed = bootStartedAt != null ? Math.max(0, nowMs - bootStartedAt) : 0;
-  const bootProgress = avgMs ? Math.min(1, bootElapsed / avgMs) : 1;
   const remainingSec = avgMs ? Math.max(0, Math.ceil((avgMs - bootElapsed) / 1000)) : null;
   const countdown = remainingSec != null ? formatCountdown(remainingSec) : null;
 
@@ -135,7 +163,7 @@ export default function App() {
             },
           ]}
         >
-          {booting && <BootRing size={TOGGLE_SIZE} stroke={5} progress={bootProgress} color={COL.booting} />}
+          {booting && <BootRing size={TOGGLE_SIZE} stroke={5} progress={ringProgress} color={COL.booting} />}
           {booting ? (
             countdown ? (
               <Text style={styles.countdown}>{countdown}</Text>
@@ -210,18 +238,20 @@ function BootRing({
 }: {
   size: number;
   stroke: number;
-  progress: number;
+  progress: Animated.Value;
   color: string;
 }) {
   const center = size / 2;
   const r = (size - stroke) / 2;
   const circumference = 2 * Math.PI * r;
-  const clamped = Math.max(0, Math.min(1, progress));
-  const offset = circumference * (1 - clamped);
+  const offset = progress.interpolate({
+    inputRange: [0, 1],
+    outputRange: [circumference, 0],
+  });
   return (
     <Svg width={size} height={size} style={StyleSheet.absoluteFill}>
       <Circle cx={center} cy={center} r={r} stroke={withAlpha(color, 0.18)} strokeWidth={stroke} fill="none" />
-      <Circle
+      <AnimatedCircle
         cx={center}
         cy={center}
         r={r}
