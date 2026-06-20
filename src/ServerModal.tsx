@@ -50,6 +50,13 @@ export function ServerModal({
   const removeIp = (key: ServerKey, index: number) =>
     setLocal((prev) => ({ ...prev, [key]: prev[key].filter((_, i) => i !== index) }));
 
+  const dirty =
+    JSON.stringify(local) !== JSON.stringify(servers) ||
+    sshUser !== ssh.user ||
+    sshPort !== String(ssh.port) ||
+    sshPassword !== ssh.password ||
+    sshCommand !== ssh.command;
+
   const save = () => {
     const cleaned: IpMap = {
       nas: local.nas.map((s) => s.trim()).filter(Boolean),
@@ -79,6 +86,7 @@ export function ServerModal({
           </View>
 
           <ScrollView
+            style={styles.scroll}
             contentContainerStyle={styles.body}
             keyboardShouldPersistTaps="handled"
             showsVerticalScrollIndicator={false}
@@ -167,12 +175,16 @@ export function ServerModal({
                 style={styles.input}
               />
             </View>
-
-            <Pressable onPress={save} style={styles.saveBtn}>
-              <Feather name="check" size={18} color="#0b0d12" />
-              <Text style={styles.saveText}>Save</Text>
-            </Pressable>
           </ScrollView>
+
+          {dirty && (
+            <View style={styles.footer}>
+              <Pressable onPress={save} style={styles.saveBtn}>
+                <Feather name="check" size={18} color="#0b0d12" />
+                <Text style={styles.saveText}>Save changes</Text>
+              </Pressable>
+            </View>
+          )}
         </View>
       </View>
     </Modal>
@@ -221,6 +233,9 @@ const styles = StyleSheet.create({
   },
   close: {
     padding: 4,
+  },
+  scroll: {
+    flex: 1,
   },
   body: {
     paddingHorizontal: 18,
@@ -290,12 +305,19 @@ const styles = StyleSheet.create({
     fontSize: 12,
     marginBottom: 4,
   },
+  footer: {
+    paddingHorizontal: 18,
+    paddingTop: 10,
+    paddingBottom: 16,
+    borderTopWidth: 1,
+    borderTopColor: C.border,
+    backgroundColor: C.bg,
+  },
   saveBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 8,
-    marginTop: 6,
     paddingVertical: 13,
     borderRadius: 14,
     backgroundColor: C.accent,

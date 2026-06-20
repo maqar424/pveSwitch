@@ -10,14 +10,29 @@ import CryptoJS from 'crypto-js';
 
 const KEY_NAME = 'pveswitch_data_key';
 
-async function getKey(): Promise<string> {
-  let key = await SecureStore.getItemAsync(KEY_NAME);
-  if (!key) {
-    const bytes = await Crypto.getRandomBytesAsync(32);
-    key = Buffer.from(bytes).toString('base64');
-    await SecureStore.setItemAsync(KEY_NAME, key);
+// Cache the key resolution so concurrent first-use callers share ONE key.
+// On a fresh install the pve + nas energy baselines (and an IP save) can all
+// trigger encryption in the same tick; without this guard each racing caller
+// saw "no key", generated a different one, and the file could end up encrypted
+// with a key the keystore no longer held — making every later launch fail to
+// decrypt and silently reset to defaults (losing saved IPs + history).
+let keyPromise: Promise<string> | null = null;
+
+function getKey(): Promise<string> {
+  if (!keyPromise) {
+    keyPromise = (async () => {
+      const existing = await SecureStore.getItemAsync(KEY_NAME);
+      if (existing) return existing;
+      const bytes = await Crypto.getRandomBytesAsync(32);
+      const key = Buffer.from(bytes).toString('base64');
+      await SecureStore.setItemAsync(KEY_NAME, key);
+      return key;
+    })().catch((e) => {
+      keyPromise = null; // don't cache a failure — allow a later retry
+      throw e;
+    });
   }
-  return key;
+  return keyPromise;
 }
 
 export async function encryptString(plaintext: string): Promise<string> {
