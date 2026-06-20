@@ -51,12 +51,15 @@ export default function App() {
   const offline = nas === 'down';
   const ready = connected && state !== null;
   const isOn = state === 'on';
-  const booting = ready && isOn && !vmUp;
 
   const { data, averageBootSeconds, bootStartedAt, addPrice, removePrice, setCurrency } = useHistory(
     { pveEnergy, nasEnergy, state, vmUp },
   );
   const totalCost = totals(data, 'cost').sum;
+
+  // "Booting" only after an actual off->on this session — bootStartedAt is set on
+  // the power-on press, not on a transient VM/Tailscale drop while already on.
+  const booting = ready && isOn && !vmUp && bootStartedAt != null;
 
   const [modalVisible, setModalVisible] = useState(false);
 
@@ -99,7 +102,7 @@ export default function App() {
   const remainingSec = avgMs ? Math.max(0, Math.ceil((avgMs - bootElapsed) / 1000)) : null;
   const countdown = remainingSec != null ? formatCountdown(remainingSec) : null;
 
-  const ringColor = !ready ? COL.muted : isOn ? (vmUp ? COL.on : COL.booting) : COL.off;
+  const ringColor = !ready ? COL.muted : booting ? COL.booting : isOn ? COL.on : COL.off;
   const showSpinner = !offline && !booting && (!ready || pending);
 
   const stateWord = offline
@@ -110,11 +113,11 @@ export default function App() {
         ? 'Reading state'
         : pending
           ? 'Switching'
-          : isOn
-            ? vmUp
+          : booting
+            ? 'Booting…'
+            : isOn
               ? 'Server on'
-              : 'Booting…'
-            : 'Server off';
+              : 'Server off';
 
   const tapHint =
     ready && !pending ? (isOn ? 'Tap to turn off' : 'Tap to turn on') : ' ';

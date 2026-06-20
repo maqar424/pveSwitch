@@ -115,10 +115,12 @@ export function useHistory(params: {
       setBootStartedAt(null);
     }
 
-    if (state === 'on' && !vmUp && bootStartRef.current === null) {
+    // Start timing a boot ONLY on a real off->on transition (i.e. the user just
+    // powered it on). Not on app-open-while-on, nor a transient VM/Tailscale drop.
+    if (state === 'on' && prevState.current === 'off' && !vmUp && bootStartRef.current === null) {
       const now = Date.now();
       bootStartRef.current = now;
-      bootRecordable.current = prevState.current === 'off';
+      bootRecordable.current = true;
       setBootStartedAt(now);
     }
 
