@@ -11,6 +11,7 @@ import {
 import { Feather } from '@expo/vector-icons';
 
 import { DEFAULT_SSH, SERVERS, type ServerKey, type SshConfig } from './config';
+import { storageDiag } from './storage';
 
 type IpMap = Record<ServerKey, string[]>;
 
@@ -34,6 +35,7 @@ export function ServerModal({
   const [sshPort, setSshPort] = useState(String(ssh.port));
   const [sshPassword, setSshPassword] = useState(ssh.password);
   const [sshCommand, setSshCommand] = useState(ssh.command);
+  const [diag, setDiag] = useState<string[]>([]);
 
   useEffect(() => {
     if (!visible) return;
@@ -42,6 +44,7 @@ export function ServerModal({
     setSshPort(String(ssh.port));
     setSshPassword(ssh.password);
     setSshCommand(ssh.command);
+    storageDiag().then(setDiag);
   }, [visible, servers, ssh]);
 
   const setIp = (key: ServerKey, index: number, value: string) =>
@@ -175,6 +178,18 @@ export function ServerModal({
                 style={styles.input}
               />
             </View>
+
+            <View style={styles.block}>
+              <Text style={styles.blockTitle}>Storage debug (temporary)</Text>
+              {diag.map((line, i) => (
+                <Text key={i} style={styles.debugLine}>
+                  {line}
+                </Text>
+              ))}
+              <Text style={styles.debugLine}>loaded nas: {servers.nas.join(', ') || '(none)'}</Text>
+              <Text style={styles.debugLine}>loaded pve: {servers.pve.join(', ') || '(none)'}</Text>
+              <Text style={styles.debugLine}>loaded vm: {servers.vm.join(', ') || '(none)'}</Text>
+            </View>
           </ScrollView>
 
           {dirty && (
@@ -265,6 +280,12 @@ const styles = StyleSheet.create({
     color: C.textTertiary,
     fontSize: 13,
     lineHeight: 18,
+  },
+  debugLine: {
+    color: C.textSecondary,
+    fontSize: 12,
+    fontFamily: 'monospace',
+    lineHeight: 17,
   },
   row: {
     flexDirection: 'row',

@@ -15,7 +15,7 @@ import {
   type ServerKey,
   type SshConfig,
 } from './config';
-import { decryptString, encryptString } from './crypto';
+import { decryptString, encryptString, peekKey, secureStoreRoundTrip } from './crypto';
 
 const FILE_NAME = 'pveswitch-data.json';
 const DATA_VERSION = 5;
@@ -165,17 +165,57 @@ function migrate(parsed: unknown): PveData {
   return base;
 }
 
+let lastLoadInfo = 'not-loaded';
+export function getLastLoadInfo(): string {
+  return lastLoadInfo;
+}
+
 export async function loadData(): Promise<PveData> {
   try {
     const file = fileRef();
-    if (!file.exists) return migrate({});
+    if (!file.exists) {
+      lastLoadInfo = 'no-file';
+      return migrate({});
+    }
     const raw = file.textSync();
     // Encrypted files are base64 ("U2FsdGVk…"); legacy files are plain JSON ("{").
-    const json = raw.trimStart().startsWith('{') ? raw : await decryptString(raw);
-    return migrate(JSON.parse(json));
-  } catch {
+    const isPlain = raw.trimStart().startsWith('{');
+    const json = isPlain ? raw : await decryptString(raw);
+    if (!json) {
+      lastLoadInfo = `decrypt-empty (raw ${raw.length})`;
+      return migrate({});
+    }
+    const result = migrate(JSON.parse(json));
+    lastLoadInfo = isPlain ? 'plaintext-ok' : 'decrypt-ok';
+    return result;
+  } catch (e) {
+    lastLoadInfo = 'error: ' + String(e);
     return migrate({});
   }
+}
+
+/** Temporary: reports the state of each persistence layer to locate the bug. */
+export async function storageDiag(): Promise<string[]> {
+  const out: string[] = [`load: ${lastLoadInfo}`];
+  try {
+    const f = fileRef();
+    if (f.exists) {
+      const t = f.textSync();
+      out.push(`file: yes len=${t.length} head="${t.slice(0, 8)}"`);
+    } else {
+      out.push('file: MISSING');
+    }
+  } catch (e) {
+    out.push('file: ERR ' + String(e));
+  }
+  try {
+    const k = await peekKey();
+    out.push(`key: ${k ? 'set len=' + k.length : 'MISSING'}`);
+  } catch (e) {
+    out.push('key: ERR ' + String(e));
+  }
+  out.push('ss-roundtrip: ' + (await secureStoreRoundTrip()));
+  return out;
 }
 
 export async function saveData(data: PveData): Promise<void> {
