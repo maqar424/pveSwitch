@@ -8,7 +8,6 @@
  * switching it off would cut power to the NAS and the broker itself.
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { AppState } from 'react-native';
 import { MqttClient } from './mqtt';
 import {
   BROKER,
@@ -48,11 +47,6 @@ export function usePlug(): PlugApi {
   const clientRef = useRef<MqttClient | null>(null);
   const pendingTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const graceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const connectedRef = useRef(false);
-
-  useEffect(() => {
-    connectedRef.current = connected;
-  }, [connected]);
 
   const startGrace = useCallback(() => {
     if (graceTimer.current) clearTimeout(graceTimer.current);
@@ -105,17 +99,6 @@ export function usePlug(): PlugApi {
       if (pendingTimer.current) clearTimeout(pendingTimer.current);
       if (graceTimer.current) clearTimeout(graceTimer.current);
     };
-  }, [startGrace]);
-
-  // Returning to the foreground (e.g. after enabling Tailscale) -> reconnect.
-  useEffect(() => {
-    const sub = AppState.addEventListener('change', (next) => {
-      if (next === 'active' && !connectedRef.current) {
-        startGrace();
-        clientRef.current?.reconnect();
-      }
-    });
-    return () => sub.remove();
   }, [startGrace]);
 
   // Once the broker confirms a new state, the command is no longer pending.
