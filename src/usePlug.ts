@@ -23,7 +23,7 @@ export interface PlugApi {
   pveEnergy: number | null;
   nasEnergy: number | null;
   pending: boolean;
-  toggle: () => void;
+  setPower: (on: boolean) => void;
   reconnect: () => void;
 }
 
@@ -108,18 +108,21 @@ export function usePlug({ hosts, port }: { hosts: string[]; port: number }): Plu
     }
   }, [state]);
 
-  const toggle = useCallback(() => {
-    if (!connected || state === null || pending) return;
-    const target = state === 'on' ? 'OFF' : 'ON';
-    setPending(true);
-    clientRef.current?.publish(SET_TOPIC, JSON.stringify({ state: target }));
-    setTimeout(
-      () => clientRef.current?.publish(GET_TOPIC, JSON.stringify({ energy: '' })),
-      1500,
-    );
-    if (pendingTimer.current) clearTimeout(pendingTimer.current);
-    pendingTimer.current = setTimeout(() => setPending(false), 6000);
-  }, [connected, state, pending]);
+  const setPower = useCallback(
+    (on: boolean) => {
+      if (!connected) return;
+      setPending(true);
+      clientRef.current?.publish(SET_TOPIC, JSON.stringify({ state: on ? 'ON' : 'OFF' }));
+      // Refresh pve energy shortly after (captures the reading at on/off).
+      setTimeout(
+        () => clientRef.current?.publish(GET_TOPIC, JSON.stringify({ energy: '' })),
+        1500,
+      );
+      if (pendingTimer.current) clearTimeout(pendingTimer.current);
+      pendingTimer.current = setTimeout(() => setPending(false), 6000);
+    },
+    [connected],
+  );
 
   const reconnect = useCallback(() => {
     startGrace();
@@ -128,5 +131,5 @@ export function usePlug({ hosts, port }: { hosts: string[]; port: number }): Plu
 
   const nas: Reach = connected ? 'up' : nasChecking ? 'checking' : 'down';
 
-  return { nas, connected, state, pveEnergy, nasEnergy, pending, toggle, reconnect };
+  return { nas, connected, state, pveEnergy, nasEnergy, pending, setPower, reconnect };
 }

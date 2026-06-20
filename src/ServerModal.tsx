@@ -10,7 +10,7 @@ import {
 } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 
-import { SERVERS, type ServerKey } from './config';
+import { DEFAULT_SSH, SERVERS, type ServerKey, type SshConfig } from './config';
 
 type IpMap = Record<ServerKey, string[]>;
 
@@ -20,23 +20,33 @@ export function ServerModal({
   visible,
   onClose,
   servers,
+  ssh,
   onSave,
 }: {
   visible: boolean;
   onClose: () => void;
   servers: IpMap;
-  onSave: (next: IpMap) => void;
+  ssh: SshConfig;
+  onSave: (servers: IpMap, ssh: SshConfig) => void;
 }) {
   const [local, setLocal] = useState<IpMap>(() => clone(servers));
+  const [sshUser, setSshUser] = useState(ssh.user);
+  const [sshPort, setSshPort] = useState(String(ssh.port));
+  const [sshPassword, setSshPassword] = useState(ssh.password);
+  const [sshCommand, setSshCommand] = useState(ssh.command);
 
   useEffect(() => {
-    if (visible) setLocal(clone(servers));
-  }, [visible, servers]);
+    if (!visible) return;
+    setLocal(clone(servers));
+    setSshUser(ssh.user);
+    setSshPort(String(ssh.port));
+    setSshPassword(ssh.password);
+    setSshCommand(ssh.command);
+  }, [visible, servers, ssh]);
 
   const setIp = (key: ServerKey, index: number, value: string) =>
     setLocal((prev) => ({ ...prev, [key]: prev[key].map((ip, i) => (i === index ? value : ip)) }));
-  const addIp = (key: ServerKey) =>
-    setLocal((prev) => ({ ...prev, [key]: [...prev[key], ''] }));
+  const addIp = (key: ServerKey) => setLocal((prev) => ({ ...prev, [key]: [...prev[key], ''] }));
   const removeIp = (key: ServerKey, index: number) =>
     setLocal((prev) => ({ ...prev, [key]: prev[key].filter((_, i) => i !== index) }));
 
@@ -46,7 +56,14 @@ export function ServerModal({
       pve: local.pve.map((s) => s.trim()).filter(Boolean),
       vm: local.vm.map((s) => s.trim()).filter(Boolean),
     };
-    onSave(cleaned);
+    const port = parseInt(sshPort, 10);
+    const cleanedSsh: SshConfig = {
+      user: sshUser.trim() || DEFAULT_SSH.user,
+      port: Number.isFinite(port) && port > 0 ? port : DEFAULT_SSH.port,
+      password: sshPassword,
+      command: sshCommand.trim() || DEFAULT_SSH.command,
+    };
+    onSave(cleaned, cleanedSsh);
     onClose();
   };
 
@@ -71,11 +88,11 @@ export function ServerModal({
             </Text>
 
             {SERVERS.map((meta) => (
-              <View key={meta.key} style={styles.serverBlock}>
-                <Text style={styles.serverLabel}>{meta.label}</Text>
-                {local[meta.key].length === 0 && <Text style={styles.empty}>No IPs</Text>}
+              <View key={meta.key} style={styles.block}>
+                <Text style={styles.blockTitle}>{meta.label}</Text>
+                {local[meta.key].length === 0 && <Text style={styles.dim}>No IPs</Text>}
                 {local[meta.key].map((ip, i) => (
-                  <View key={i} style={styles.ipRow}>
+                  <View key={i} style={styles.row}>
                     <TextInput
                       value={ip}
                       onChangeText={(v) => setIp(meta.key, i, v)}
@@ -97,6 +114,59 @@ export function ServerModal({
                 </Pressable>
               </View>
             ))}
+
+            <View style={styles.block}>
+              <Text style={styles.blockTitle}>Graceful shutdown (SSH)</Text>
+              <Text style={styles.dim}>
+                Safely shuts down pve before cutting power. Leave the password empty to just cut power.
+              </Text>
+              <View style={styles.fieldRow}>
+                <View style={{ flex: 2 }}>
+                  <Text style={styles.fieldLabel}>User</Text>
+                  <TextInput
+                    value={sshUser}
+                    onChangeText={setSshUser}
+                    placeholder="root"
+                    placeholderTextColor={C.textTertiary}
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                    style={styles.input}
+                  />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.fieldLabel}>Port</Text>
+                  <TextInput
+                    value={sshPort}
+                    onChangeText={setSshPort}
+                    placeholder="22"
+                    placeholderTextColor={C.textTertiary}
+                    keyboardType="number-pad"
+                    style={styles.input}
+                  />
+                </View>
+              </View>
+              <Text style={styles.fieldLabel}>Password</Text>
+              <TextInput
+                value={sshPassword}
+                onChangeText={setSshPassword}
+                placeholder="(SSH password)"
+                placeholderTextColor={C.textTertiary}
+                secureTextEntry
+                autoCapitalize="none"
+                autoCorrect={false}
+                style={styles.input}
+              />
+              <Text style={styles.fieldLabel}>Command</Text>
+              <TextInput
+                value={sshCommand}
+                onChangeText={setSshCommand}
+                placeholder="shutdown -h now"
+                placeholderTextColor={C.textTertiary}
+                autoCapitalize="none"
+                autoCorrect={false}
+                style={styles.input}
+              />
+            </View>
 
             <Pressable onPress={save} style={styles.saveBtn}>
               <Feather name="check" size={18} color="#0b0d12" />
@@ -162,7 +232,7 @@ const styles = StyleSheet.create({
     fontSize: 13,
     lineHeight: 18,
   },
-  serverBlock: {
+  block: {
     backgroundColor: C.surface,
     borderRadius: 14,
     borderWidth: 1,
@@ -170,17 +240,18 @@ const styles = StyleSheet.create({
     padding: 14,
     gap: 8,
   },
-  serverLabel: {
+  blockTitle: {
     color: C.textPrimary,
     fontSize: 16,
     fontWeight: '600',
     marginBottom: 2,
   },
-  empty: {
+  dim: {
     color: C.textTertiary,
     fontSize: 13,
+    lineHeight: 18,
   },
-  ipRow: {
+  row: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
@@ -195,7 +266,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
     paddingHorizontal: 12,
     paddingVertical: 9,
-    fontVariant: ['tabular-nums'],
   },
   iconBtn: {
     padding: 6,
@@ -210,6 +280,15 @@ const styles = StyleSheet.create({
     color: C.accent,
     fontSize: 14,
     fontWeight: '500',
+  },
+  fieldRow: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  fieldLabel: {
+    color: C.textTertiary,
+    fontSize: 12,
+    marginBottom: 4,
   },
   saveBtn: {
     flexDirection: 'row',

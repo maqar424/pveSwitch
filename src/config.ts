@@ -34,6 +34,21 @@ export const DEFAULT_SERVER_IPS: Record<ServerKey, string[]> = {
   vm: ['100.111.150.88'],
 };
 
+/** SSH details for the graceful pve shutdown (connects to a reachable pve IP). */
+export interface SshConfig {
+  user: string;
+  port: number;
+  password: string;
+  command: string;
+}
+
+export const DEFAULT_SSH: SshConfig = {
+  user: 'root',
+  port: 22,
+  password: '',
+  command: 'shutdown -h now',
+};
+
 /** Zigbee2MQTT topics for the pve switch (which we control). */
 export const SET_TOPIC = 'zigbee2mqtt/pveSwitch/set';
 export const STATE_TOPIC = 'zigbee2mqtt/pveSwitch';

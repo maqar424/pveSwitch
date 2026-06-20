@@ -8,11 +8,17 @@
  * encrypted.
  */
 import { File, Paths } from 'expo-file-system';
-import { DEFAULT_CURRENCY, DEFAULT_SERVER_IPS, type ServerKey } from './config';
+import {
+  DEFAULT_CURRENCY,
+  DEFAULT_SERVER_IPS,
+  DEFAULT_SSH,
+  type ServerKey,
+  type SshConfig,
+} from './config';
 import { decryptString, encryptString } from './crypto';
 
 const FILE_NAME = 'pveswitch-data.json';
-const DATA_VERSION = 4;
+const DATA_VERSION = 5;
 
 let idCounter = 0;
 export function genId(): string {
@@ -42,6 +48,8 @@ export interface PveData {
   currency: string;
   /** Per-server candidate IPs (the app uses whichever is reachable). */
   servers: Record<ServerKey, string[]>;
+  /** SSH details for the graceful pve shutdown. */
+  ssh: SshConfig;
 }
 
 const emptySeries = (): EnergySeries => ({ baseline: null, baselineAt: null, byDay: {} });
@@ -55,6 +63,7 @@ export const emptyData = (): PveData => ({
   prices: [],
   currency: DEFAULT_CURRENCY,
   servers: { nas: [], pve: [], vm: [] },
+  ssh: DEFAULT_SSH,
 });
 
 function fileRef(): File {
@@ -113,6 +122,17 @@ function normalizeServers(s: unknown): Record<ServerKey, string[]> {
   return { nas: pick('nas'), pve: pick('pve'), vm: pick('vm') };
 }
 
+function normalizeSsh(s: unknown): SshConfig {
+  const o = (s ?? {}) as Record<string, any>;
+  const port = Number(o.port);
+  return {
+    user: typeof o.user === 'string' && o.user ? o.user : DEFAULT_SSH.user,
+    port: Number.isFinite(port) && port > 0 ? port : DEFAULT_SSH.port,
+    password: typeof o.password === 'string' ? o.password : DEFAULT_SSH.password,
+    command: typeof o.command === 'string' && o.command ? o.command : DEFAULT_SSH.command,
+  };
+}
+
 function migrate(parsed: unknown): PveData {
   const base = emptyData();
   const p = (parsed && typeof parsed === 'object' ? parsed : {}) as Record<string, any>;
@@ -126,12 +146,14 @@ function migrate(parsed: unknown): PveData {
       prices: normalizePrices(p.prices),
       currency: typeof p.currency === 'string' ? p.currency : DEFAULT_CURRENCY,
       servers: normalizeServers(p.servers),
+      ssh: normalizeSsh(p.ssh),
       version: DATA_VERSION,
     };
   }
 
   // v1 shape, or a brand-new install: start from defaults.
   base.servers = normalizeServers(p.servers);
+  base.ssh = normalizeSsh(p.ssh);
   if (Array.isArray(p.bootTimes)) base.bootTimes = p.bootTimes;
   if (p.energyByDay || typeof p.energyBaseline === 'number') {
     base.pve = {

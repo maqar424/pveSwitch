@@ -27,6 +27,7 @@ import { EnergyModal } from './src/EnergyModal';
 import { ServerModal } from './src/ServerModal';
 import { useAppLock } from './src/useAppLock';
 import { LockScreen } from './src/LockScreen';
+import { useShutdown } from './src/useShutdown';
 
 const COL = {
   bgTop: '#10131a',
@@ -52,7 +53,7 @@ export default function App() {
   const store = useStore(unlocked);
   const data = store.data;
 
-  const { nas, connected, state, pveEnergy, nasEnergy, pending, toggle, reconnect } = usePlug({
+  const { nas, connected, state, pveEnergy, nasEnergy, pending, setPower, reconnect } = usePlug({
     hosts: data.servers.nas,
     port: BROKER_PORT,
   });
@@ -62,6 +63,17 @@ export default function App() {
   const offline = nas === 'down';
   const ready = connected && state !== null;
   const isOn = state === 'on';
+
+  const shutdown = useShutdown({
+    pveReach: reach.pve,
+    pveHosts: data.servers.pve,
+    ssh: data.ssh,
+    powerOff: () => setPower(false),
+  });
+  const sshConfigured = data.ssh.password.trim().length > 0;
+  const shuttingDown = shutdown.phase === 'sending' || shutdown.phase === 'waiting';
+  const shutdownFailed = shutdown.phase === 'error';
+  const shutdownActive = shuttingDown || shutdownFailed;
 
   const { averageBootSeconds, bootStartedAt } = useRecorder(store, {
     pveEnergy,
@@ -117,30 +129,62 @@ export default function App() {
   const remainingSec = avgMs ? Math.max(0, Math.ceil((avgMs - bootElapsed) / 1000)) : null;
   const countdown = remainingSec != null ? formatCountdown(remainingSec) : null;
 
-  const ringColor = !ready ? COL.muted : booting ? COL.booting : isOn ? COL.on : COL.off;
-  const showSpinner = !offline && !booting && (!ready || pending);
+  const ringColor = shutdownFailed
+    ? COL.down
+    : shuttingDown
+      ? COL.booting
+      : !ready
+        ? COL.muted
+        : booting
+          ? COL.booting
+          : isOn
+            ? COL.on
+            : COL.off;
+  const showSpinner =
+    shuttingDown || (!offline && !shutdownActive && !booting && (!ready || pending));
 
-  const stateWord = offline
-    ? 'Offline'
-    : !connected
-      ? 'Connecting'
-      : state === null
-        ? 'Reading state'
-        : pending
-          ? 'Switching'
-          : booting
-            ? 'Booting…'
-            : isOn
-              ? 'Server on'
-              : 'Server off';
+  const stateWord = shutdownFailed
+    ? 'Shutdown failed'
+    : shuttingDown
+      ? 'Shutting down…'
+      : offline
+        ? 'Offline'
+        : !connected
+          ? 'Connecting'
+          : state === null
+            ? 'Reading state'
+            : pending
+              ? 'Switching'
+              : booting
+                ? 'Booting…'
+                : isOn
+                  ? 'Server on'
+                  : 'Server off';
 
-  const tapHint =
-    ready && !pending ? (isOn ? 'Tap to turn off' : 'Tap to turn on') : ' ';
+  const tapHint = shuttingDown
+    ? 'Cutting power once it’s down'
+    : shutdownFailed
+      ? (shutdown.error ?? 'SSH failed')
+      : ready && !pending
+        ? isOn
+          ? 'Tap to turn off'
+          : 'Tap to turn on'
+        : ' ';
 
   const onToggle = () => {
-    if (!ready || pending) return;
+    if (shutdownActive || !ready || pending) return;
     Haptics.selectionAsync();
-    toggle();
+    if (isOn) {
+      if (sshConfigured) void shutdown.start();
+      else setPower(false);
+    } else {
+      setPower(true);
+    }
+  };
+
+  const onForceOff = () => {
+    Haptics.selectionAsync();
+    shutdown.forceOff();
   };
 
   const onRetry = () => {
@@ -183,7 +227,7 @@ export default function App() {
       <View style={styles.center}>
         <Pressable
           onPress={onToggle}
-          disabled={!ready || pending}
+          disabled={shutdownActive || !ready || pending}
           style={({ pressed }) => [
             styles.toggle,
             {
@@ -210,23 +254,35 @@ export default function App() {
         <Text style={styles.stateWord}>{stateWord}</Text>
         <Text style={styles.tapHint}>{tapHint}</Text>
 
-        <Pressable
-          onPress={onOpenEnergy}
-          style={({ pressed }) => [styles.energy, { opacity: pressed ? 0.7 : 1 }]}
-        >
-          <Feather name="bar-chart-2" size={13} color={COL.textTertiary} />
-          <Text style={styles.energyText}>{formatValue(totalCost, 'cost', data.currency)}</Text>
-          <Feather name="chevron-right" size={14} color={COL.textTertiary} />
-        </Pressable>
-
-        {offline && (
+        {shutdownActive ? (
           <Pressable
-            onPress={onRetry}
-            style={({ pressed }) => [styles.retry, { opacity: pressed ? 0.7 : 1 }]}
+            onPress={onForceOff}
+            style={({ pressed }) => [styles.forceOff, { opacity: pressed ? 0.85 : 1 }]}
           >
-            <Feather name="refresh-cw" size={14} color={COL.textPrimary} />
-            <Text style={styles.retryText}>Retry connecting</Text>
+            <Feather name="power" size={15} color="#0b0d12" />
+            <Text style={styles.forceOffText}>Force power off</Text>
           </Pressable>
+        ) : (
+          <>
+            <Pressable
+              onPress={onOpenEnergy}
+              style={({ pressed }) => [styles.energy, { opacity: pressed ? 0.7 : 1 }]}
+            >
+              <Feather name="bar-chart-2" size={13} color={COL.textTertiary} />
+              <Text style={styles.energyText}>{formatValue(totalCost, 'cost', data.currency)}</Text>
+              <Feather name="chevron-right" size={14} color={COL.textTertiary} />
+            </Pressable>
+
+            {offline && (
+              <Pressable
+                onPress={onRetry}
+                style={({ pressed }) => [styles.retry, { opacity: pressed ? 0.7 : 1 }]}
+              >
+                <Feather name="refresh-cw" size={14} color={COL.textPrimary} />
+                <Text style={styles.retryText}>Retry connecting</Text>
+              </Pressable>
+            )}
+          </>
         )}
       </View>
 
@@ -271,7 +327,8 @@ export default function App() {
         visible={serverModalVisible}
         onClose={() => setServerModalVisible(false)}
         servers={data.servers}
-        onSave={store.setServers}
+        ssh={data.ssh}
+        onSave={(servers, ssh) => store.commit({ ...store.getData(), servers, ssh })}
       />
     </View>
   );
@@ -440,6 +497,21 @@ const styles = StyleSheet.create({
     color: COL.textPrimary,
     fontSize: 14,
     fontWeight: '500',
+  },
+  forceOff: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 18,
+    paddingVertical: 11,
+    paddingHorizontal: 20,
+    borderRadius: 999,
+    backgroundColor: COL.down,
+  },
+  forceOffText: {
+    color: '#0b0d12',
+    fontSize: 14,
+    fontWeight: '600',
   },
   statusCard: {
     backgroundColor: COL.card,
