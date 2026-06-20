@@ -1,52 +1,52 @@
 /**
- * Persistent "save file" for pveSwitch, stored as JSON in the app's document
- * directory via expo-file-system. Holds two energy series (pve + nas), recorded
- * boot durations, and a price history (price per kWh, valid from a date).
+ * Persistent encrypted "save file" for pveSwitch, stored as AES ciphertext in
+ * the app's document directory. Holds two energy series (pve + nas), boot
+ * durations, a price history, the currency, and the per-server IP lists.
+ *
+ * load/save are async (encryption key comes from the secure keystore). Existing
+ * plaintext files (pre-encryption) are detected and read once, then re-saved
+ * encrypted.
  */
 import { File, Paths } from 'expo-file-system';
-import { DEFAULT_CURRENCY } from './config';
+import { DEFAULT_CURRENCY, DEFAULT_SERVER_IPS, type ServerKey } from './config';
+import { decryptString, encryptString } from './crypto';
 
 const FILE_NAME = 'pveswitch-data.json';
-const DATA_VERSION = 3;
+const DATA_VERSION = 4;
 
 let idCounter = 0;
-/** Small unique id for price entries. */
 export function genId(): string {
   idCounter += 1;
   return `${Date.now().toString(36)}-${idCounter.toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
 }
 
 export interface EnergySeries {
-  /** Last cumulative reading (kWh) — the baseline for the next delta. */
   baseline: number | null;
-  /** ISO timestamp of that reading (used to spread NAS deltas over time). */
   baselineAt: string | null;
-  /** Energy consumed per day in kWh, keyed by 'YYYY-MM-DD'. */
   byDay: Record<string, number>;
 }
 
-/**
- * A kWh price valid over a date range (inclusive). `start === null` means "since
- * the very beginning"; `end === null` means "current" (ongoing).
- */
 export interface PriceEntry {
   id: string;
-  start: string | null; // 'YYYY-MM-DD' or null
-  end: string | null; // 'YYYY-MM-DD' or null
-  price: number; // currency per kWh
+  start: string | null; // null = since the beginning
+  end: string | null; // null = current / ongoing
+  price: number;
 }
 
 export interface PveData {
   version: number;
   pve: EnergySeries;
   nas: EnergySeries;
-  bootTimes: number[]; // seconds, most recent last
-  prices: PriceEntry[]; // sorted ascending by `from`
+  bootTimes: number[];
+  prices: PriceEntry[];
   currency: string;
+  /** Per-server candidate IPs (the app uses whichever is reachable). */
+  servers: Record<ServerKey, string[]>;
 }
 
 const emptySeries = (): EnergySeries => ({ baseline: null, baselineAt: null, byDay: {} });
 
+/** In-memory placeholder before the file is loaded — empty IPs so nothing connects. */
 export const emptyData = (): PveData => ({
   version: DATA_VERSION,
   pve: emptySeries(),
@@ -54,13 +54,13 @@ export const emptyData = (): PveData => ({
   bootTimes: [],
   prices: [],
   currency: DEFAULT_CURRENCY,
+  servers: { nas: [], pve: [], vm: [] },
 });
 
 function fileRef(): File {
   return new File(Paths.document, FILE_NAME);
 }
 
-/** Local 'YYYY-MM-DD' for a date (defaults to now). */
 export function dayKey(date = new Date()): string {
   const y = date.getFullYear();
   const m = String(date.getMonth() + 1).padStart(2, '0');
@@ -68,7 +68,6 @@ export function dayKey(date = new Date()): string {
   return `${y}-${m}-${d}`;
 }
 
-/** Inclusive list of day keys from the date in `startISO` to `end`. */
 export function dayKeysFromTo(startISO: string, end: Date = new Date()): string[] {
   const start = new Date(startISO);
   const s = new Date(start.getFullYear(), start.getMonth(), start.getDate());
@@ -84,7 +83,6 @@ export function dayKeysFromTo(startISO: string, end: Date = new Date()): string[
   return keys.length > 0 ? keys : [dayKey(e)];
 }
 
-/** Accept both the old `{from, price}` and the new `{start, end, price}` shapes. */
 function normalizePrices(arr: unknown): PriceEntry[] {
   if (!Array.isArray(arr)) return [];
   const out: PriceEntry[] = [];
@@ -94,12 +92,7 @@ function normalizePrices(arr: unknown): PriceEntry[] {
     const price = Number(e.price);
     if (!Number.isFinite(price)) continue;
     if ('start' in e || 'end' in e) {
-      out.push({
-        id: typeof e.id === 'string' ? e.id : genId(),
-        start: e.start ?? null,
-        end: e.end ?? null,
-        price,
-      });
+      out.push({ id: typeof e.id === 'string' ? e.id : genId(), start: e.start ?? null, end: e.end ?? null, price });
     } else if ('from' in e) {
       out.push({ id: genId(), start: e.from ?? null, end: null, price });
     }
@@ -107,13 +100,23 @@ function normalizePrices(arr: unknown): PriceEntry[] {
   return out;
 }
 
+function normalizeServers(s: unknown): Record<ServerKey, string[]> {
+  const obj = (s ?? {}) as Record<string, any>;
+  const pick = (k: ServerKey): string[] => {
+    const v = obj[k];
+    if (Array.isArray(v)) {
+      const ips = v.filter((x) => typeof x === 'string' && x.trim().length > 0);
+      return ips.length > 0 ? ips : DEFAULT_SERVER_IPS[k];
+    }
+    return DEFAULT_SERVER_IPS[k];
+  };
+  return { nas: pick('nas'), pve: pick('pve'), vm: pick('vm') };
+}
+
 function migrate(parsed: unknown): PveData {
   const base = emptyData();
-  if (!parsed || typeof parsed !== 'object') return base;
-  const p = parsed as Record<string, any>;
+  const p = (parsed && typeof parsed === 'object' ? parsed : {}) as Record<string, any>;
 
-  // v2/v3 share the same series shape; only the price model changed (handled
-  // by normalizePrices). Detect by the presence of the energy series.
   if (p.pve && p.nas) {
     return {
       ...base,
@@ -122,11 +125,13 @@ function migrate(parsed: unknown): PveData {
       bootTimes: Array.isArray(p.bootTimes) ? p.bootTimes : [],
       prices: normalizePrices(p.prices),
       currency: typeof p.currency === 'string' ? p.currency : DEFAULT_CURRENCY,
+      servers: normalizeServers(p.servers),
       version: DATA_VERSION,
     };
   }
 
-  // v1: { energyBaseline, energyByDay, bootTimes } -> becomes the pve series.
+  // v1 shape, or a brand-new install: start from defaults.
+  base.servers = normalizeServers(p.servers);
   if (Array.isArray(p.bootTimes)) base.bootTimes = p.bootTimes;
   if (p.energyByDay || typeof p.energyBaseline === 'number') {
     base.pve = {
@@ -138,21 +143,25 @@ function migrate(parsed: unknown): PveData {
   return base;
 }
 
-export function loadData(): PveData {
+export async function loadData(): Promise<PveData> {
   try {
     const file = fileRef();
-    if (!file.exists) return emptyData();
-    return migrate(JSON.parse(file.textSync()));
+    if (!file.exists) return migrate({});
+    const raw = file.textSync();
+    // Encrypted files are base64 ("U2FsdGVk…"); legacy files are plain JSON ("{").
+    const json = raw.trimStart().startsWith('{') ? raw : await decryptString(raw);
+    return migrate(JSON.parse(json));
   } catch {
-    return emptyData();
+    return migrate({});
   }
 }
 
-export function saveData(data: PveData): void {
+export async function saveData(data: PveData): Promise<void> {
   try {
+    const ciphertext = await encryptString(JSON.stringify(data));
     const file = fileRef();
     if (!file.exists) file.create();
-    file.write(JSON.stringify(data));
+    file.write(ciphertext);
   } catch {
     // ignore write failures
   }

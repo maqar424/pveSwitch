@@ -10,7 +10,13 @@
     "newArchEnabled": false,
     "plugins": [
       "./plugins/withTailscaleQueries.js",
-      ["expo-local-authentication", { "faceIDPermission": "Unlock pveSwitch with Face ID." }]
+      [
+        "expo-local-authentication",
+        {
+          "faceIDPermission": "Unlock pveSwitch with Face ID."
+        }
+      ],
+      "expo-secure-store"
     ],
     "ios": {
       "supportsTablet": true

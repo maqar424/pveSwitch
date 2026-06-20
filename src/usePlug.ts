@@ -1,31 +1,22 @@
 /**
  * Owns the persistent MQTT connection and exposes the pve plug's live state,
- * both plugs' energy readings (pve + nas), NAS reachability, a single
- * `toggle()`, and a manual `reconnect()`.
+ * both plugs' energy readings, NAS reachability, a `toggle()` and a manual
+ * `reconnect()`. The broker IPs come from the store (multiple candidates — the
+ * client cycles to whichever is reachable). With no IPs it stays idle.
  *
- * Safety: this hook only ever publishes to the pve switch's SET topic. The NAS
- * switch is subscribed/queried for energy but is NEVER sent a state command —
- * switching it off would cut power to the NAS and the broker itself.
+ * Safety: only ever publishes to the pve switch's SET topic; nasSwitch is
+ * monitor-only.
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { MqttClient } from './mqtt';
-import {
-  BROKER,
-  GET_TOPIC,
-  NAS_GET_TOPIC,
-  NAS_STATE_TOPIC,
-  SET_TOPIC,
-  STATE_TOPIC,
-} from './config';
+import { GET_TOPIC, NAS_GET_TOPIC, NAS_STATE_TOPIC, SET_TOPIC, STATE_TOPIC } from './config';
 import type { Reach } from './useReachability';
 
 export type PlugState = 'on' | 'off' | null;
 
-/** Grace window before a missing connection is reported as "down" (vs "checking"). */
 const NAS_GRACE_MS = 5000;
 
 export interface PlugApi {
-  /** NAS reachability, derived from the live MQTT link. */
   nas: Reach;
   connected: boolean;
   state: PlugState;
@@ -36,7 +27,7 @@ export interface PlugApi {
   reconnect: () => void;
 }
 
-export function usePlug(): PlugApi {
+export function usePlug({ hosts, port }: { hosts: string[]; port: number }): PlugApi {
   const [connected, setConnected] = useState(false);
   const [nasChecking, setNasChecking] = useState(true);
   const [state, setState] = useState<PlugState>(null);
@@ -54,11 +45,18 @@ export function usePlug(): PlugApi {
     graceTimer.current = setTimeout(() => setNasChecking(false), NAS_GRACE_MS);
   }, []);
 
+  const hostsKey = hosts.join(',');
+
   useEffect(() => {
+    if (hosts.length === 0) {
+      setConnected(false);
+      setNasChecking(true);
+      return;
+    }
     startGrace();
 
     const client = new MqttClient(
-      { host: BROKER.host, port: BROKER.port, keepAliveSeconds: 60 },
+      { hosts, port, keepAliveSeconds: 60 },
       {
         onConnect: () => {
           setConnected(true);
@@ -66,7 +64,6 @@ export function usePlug(): PlugApi {
           if (graceTimer.current) clearTimeout(graceTimer.current);
           client.subscribe(STATE_TOPIC);
           client.subscribe(NAS_STATE_TOPIC);
-          // Ask both plugs to report their current state + energy right away.
           client.publish(GET_TOPIC, JSON.stringify({ state: '', energy: '' }));
           client.publish(NAS_GET_TOPIC, JSON.stringify({ energy: '' }));
         },
@@ -96,12 +93,13 @@ export function usePlug(): PlugApi {
 
     return () => {
       client.disconnect();
+      clientRef.current = null;
       if (pendingTimer.current) clearTimeout(pendingTimer.current);
       if (graceTimer.current) clearTimeout(graceTimer.current);
     };
-  }, [startGrace]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hostsKey, port, startGrace]);
 
-  // Once the broker confirms a new state, the command is no longer pending.
   useEffect(() => {
     setPending(false);
     if (pendingTimer.current) {
@@ -115,14 +113,10 @@ export function usePlug(): PlugApi {
     const target = state === 'on' ? 'OFF' : 'ON';
     setPending(true);
     clientRef.current?.publish(SET_TOPIC, JSON.stringify({ state: target }));
-
-    // Refresh pve energy on every toggle (on AND off) for accurate deltas.
     setTimeout(
       () => clientRef.current?.publish(GET_TOPIC, JSON.stringify({ energy: '' })),
       1500,
     );
-
-    // Safety net: stop showing the spinner even if no report arrives.
     if (pendingTimer.current) clearTimeout(pendingTimer.current);
     pendingTimer.current = setTimeout(() => setPending(false), 6000);
   }, [connected, state, pending]);

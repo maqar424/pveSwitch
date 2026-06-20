@@ -16,13 +16,15 @@ import Svg, { Circle } from 'react-native-svg';
 
 const AnimatedCircle = Animated.createAnimatedComponent(Circle);
 
-import { NAS, PING_HOSTS } from './src/config';
+import { BROKER_PORT, SERVERS } from './src/config';
 import { openTailscale } from './src/tailscale';
 import { usePlug } from './src/usePlug';
 import { useReachability, type Reach } from './src/useReachability';
-import { useHistory } from './src/useHistory';
+import { useStore } from './src/useStore';
+import { useRecorder } from './src/useRecorder';
 import { totals, formatValue } from './src/aggregate';
 import { EnergyModal } from './src/EnergyModal';
+import { ServerModal } from './src/ServerModal';
 import { useAppLock } from './src/useAppLock';
 import { LockScreen } from './src/LockScreen';
 
@@ -47,17 +49,26 @@ const TOGGLE_SIZE = 200;
 
 export default function App() {
   const { unlocked, authenticate } = useAppLock();
-  const { nas, connected, state, pveEnergy, nasEnergy, pending, toggle, reconnect } = usePlug();
-  const reach = useReachability();
-  const vmUp = reach[PING_HOSTS[1].key] === 'up';
+  const store = useStore(unlocked);
+  const data = store.data;
+
+  const { nas, connected, state, pveEnergy, nasEnergy, pending, toggle, reconnect } = usePlug({
+    hosts: data.servers.nas,
+    port: BROKER_PORT,
+  });
+  const reach = useReachability(data.servers);
+  const vmUp = reach.vm === 'up';
 
   const offline = nas === 'down';
   const ready = connected && state !== null;
   const isOn = state === 'on';
 
-  const { data, averageBootSeconds, bootStartedAt, addPrice, removePrice, setCurrency } = useHistory(
-    { pveEnergy, nasEnergy, state, vmUp },
-  );
+  const { averageBootSeconds, bootStartedAt } = useRecorder(store, {
+    pveEnergy,
+    nasEnergy,
+    state,
+    vmUp,
+  });
   const totalCost = totals(data, 'cost').sum;
 
   // "Booting" only after an actual off->on this session — bootStartedAt is set on
@@ -65,6 +76,7 @@ export default function App() {
   const booting = ready && isOn && !vmUp && bootStartedAt != null;
 
   const [modalVisible, setModalVisible] = useState(false);
+  const [serverModalVisible, setServerModalVisible] = useState(false);
 
   const avgMs = averageBootSeconds != null ? averageBootSeconds * 1000 : null;
 
@@ -141,11 +153,18 @@ export default function App() {
     setModalVisible(true);
   };
 
-  const rows = [
-    { label: NAS.label, host: NAS.host, reach: nas, depth: 0 },
-    { label: PING_HOSTS[0].label, host: PING_HOSTS[0].host, reach: reach[PING_HOSTS[0].key], depth: 1 },
-    { label: PING_HOSTS[1].label, host: PING_HOSTS[1].host, reach: reach[PING_HOSTS[1].key], depth: 2 },
-  ];
+  const onOpenServers = () => {
+    Haptics.selectionAsync();
+    setServerModalVisible(true);
+  };
+
+  const reachByKey: Record<string, Reach> = { nas, pve: reach.pve, vm: reach.vm };
+  const rows = SERVERS.map((s, i) => ({
+    key: s.key,
+    label: s.label,
+    reach: reachByKey[s.key],
+    depth: i,
+  }));
 
   if (!unlocked) {
     return <LockScreen onUnlock={authenticate} />;
@@ -228,24 +247,31 @@ export default function App() {
             <Feather name="external-link" size={12} color={COL.checking} />
           </Pressable>
         )}
-        {rows.map((row) => (
-          <StatusRow
-            key={row.label}
-            label={row.label}
-            host={row.host}
-            reach={row.reach}
-            depth={row.depth}
-          />
-        ))}
+        <Pressable onPress={onOpenServers} style={({ pressed }) => ({ opacity: pressed ? 0.7 : 1 })}>
+          {rows.map((row) => (
+            <StatusRow key={row.key} label={row.label} reach={row.reach} depth={row.depth} />
+          ))}
+          <View style={styles.editHint}>
+            <Feather name="edit-2" size={11} color={COL.textTertiary} />
+            <Text style={styles.editHintText}>Edit server IPs</Text>
+          </View>
+        </Pressable>
       </View>
 
       <EnergyModal
         visible={modalVisible}
         onClose={() => setModalVisible(false)}
         data={data}
-        addPrice={addPrice}
-        removePrice={removePrice}
-        setCurrency={setCurrency}
+        addPrice={store.addPrice}
+        removePrice={store.removePrice}
+        setCurrency={store.setCurrency}
+      />
+
+      <ServerModal
+        visible={serverModalVisible}
+        onClose={() => setServerModalVisible(false)}
+        servers={data.servers}
+        onSave={store.setServers}
       />
     </View>
   );
@@ -288,17 +314,7 @@ function BootRing({
   );
 }
 
-function StatusRow({
-  label,
-  host,
-  reach,
-  depth,
-}: {
-  label: string;
-  host: string;
-  reach: Reach;
-  depth: number;
-}) {
+function StatusRow({ label, reach, depth }: { label: string; reach: Reach; depth: number }) {
   const color = reach === 'up' ? COL.up : reach === 'down' ? COL.down : COL.checking;
   const word = reach === 'up' ? 'online' : reach === 'down' ? 'offline' : 'checking';
 
@@ -313,10 +329,8 @@ function StatusRow({
         />
       )}
       <View style={[styles.dot, { backgroundColor: color }]} />
-      <View style={styles.statusText}>
-        <Text style={styles.statusLabel}>{label}</Text>
-        <Text style={styles.statusIp}>{host}</Text>
-      </View>
+      <Text style={styles.statusLabel}>{label}</Text>
+      <View style={styles.spacer} />
       <Text style={[styles.statusWord, { color }]}>{word}</Text>
     </View>
   );
@@ -465,19 +479,25 @@ const styles = StyleSheet.create({
     borderRadius: 5,
     marginRight: 12,
   },
-  statusText: {
-    flex: 1,
-  },
   statusLabel: {
     color: COL.textPrimary,
     fontSize: 15,
     fontWeight: '500',
   },
-  statusIp: {
+  spacer: {
+    flex: 1,
+  },
+  editHint: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 5,
+    paddingTop: 8,
+    paddingBottom: 2,
+  },
+  editHintText: {
     color: COL.textTertiary,
-    fontSize: 12,
-    marginTop: 1,
-    fontVariant: ['tabular-nums'],
+    fontSize: 11,
   },
   statusWord: {
     fontSize: 13,

@@ -12,7 +12,8 @@ import { Buffer } from 'buffer';
 type Socket = ReturnType<typeof TcpSocket.createConnection>;
 
 export interface MqttOptions {
-  host: string;
+  /** Candidate broker IPs; each connect attempt advances to the next. */
+  hosts: string[];
   port: number;
   keepAliveSeconds?: number;
 }
@@ -58,6 +59,7 @@ export class MqttClient {
   private socket?: Socket;
   private buffer = Buffer.alloc(0);
   private packetId = 0;
+  private hostIndex = 0;
   private connected = false;
   private closedByUser = false;
   private pingTimer?: ReturnType<typeof setInterval>;
@@ -75,10 +77,14 @@ export class MqttClient {
     this.stopConnectTimer();
     this.buffer = Buffer.alloc(0);
 
+    if (this.options.hosts.length === 0) return;
+    const host = this.options.hosts[this.hostIndex % this.options.hosts.length];
+    this.hostIndex += 1;
+
     const clientId = `pveswitch-${Math.random().toString(16).slice(2, 10)}`;
     try {
       const socket = TcpSocket.createConnection(
-        { host: this.options.host, port: this.options.port },
+        { host, port: this.options.port },
         () => socket.write(this.buildConnect(clientId)),
       );
       this.socket = socket;

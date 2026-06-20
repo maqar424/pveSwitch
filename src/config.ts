@@ -1,58 +1,54 @@
 /**
- * App configuration — everything you might want to change lives here.
+ * App configuration. Server IP addresses now live in the save file (editable in
+ * the Servers popup); only their fixed metadata (names, ports, hierarchy) and
+ * the first-run defaults live here.
  */
 
-export interface DisplayHost {
-  key: string;
+export type ServerKey = 'nas' | 'pve' | 'vm';
+
+export interface ServerMeta {
+  key: ServerKey;
   label: string;
-  host: string;
+  /** Port used for the reachability check (NAS = broker port). */
+  port: number;
+  /** Reachability strictness: when true only an open port counts as up. */
+  strict?: boolean;
 }
 
-/** The NAS / Tailscale gateway. Tracked via the live MQTT link, not a ping. */
-export const NAS: DisplayHost = { key: 'nas', label: 'NAS', host: '100.108.70.1' };
+/** Fixed hierarchy + names + ports, top → bottom. Names/order are not editable. */
+export const SERVERS: ServerMeta[] = [
+  { key: 'nas', label: 'NAS', port: 1883 }, // mosquitto
+  { key: 'pve', label: 'pve', port: 8006 }, // Proxmox web UI
+  { key: 'vm', label: 'Ubuntu VM', port: 22, strict: true }, // SSH
+];
 
-export const BROKER = {
-  host: NAS.host,
-  port: 1883,
-} as const;
+/** Servers checked by TCP ping (everything below the NAS, which uses the MQTT link). */
+export const PING_SERVERS = SERVERS.filter((s) => s.key !== 'nas');
+
+export const BROKER_PORT = 1883;
+
+/** First-run defaults (the previously hard-coded Tailscale IPs). */
+export const DEFAULT_SERVER_IPS: Record<ServerKey, string[]> = {
+  nas: ['100.108.70.1'],
+  pve: ['100.111.213.5'],
+  vm: ['100.111.150.88'],
+};
 
 /** Zigbee2MQTT topics for the pve switch (which we control). */
-export const SET_TOPIC = 'zigbee2mqtt/pveSwitch/set'; // publish {"state":"ON"|"OFF"}
-export const STATE_TOPIC = 'zigbee2mqtt/pveSwitch'; // device reports {"state":..,"energy":..}
-export const GET_TOPIC = 'zigbee2mqtt/pveSwitch/get'; // ask the device to report now
+export const SET_TOPIC = 'zigbee2mqtt/pveSwitch/set';
+export const STATE_TOPIC = 'zigbee2mqtt/pveSwitch';
+export const GET_TOPIC = 'zigbee2mqtt/pveSwitch/get';
 
 /**
- * nasSwitch is MONITOR-ONLY. We read its energy but must NEVER publish to a
- * `…/set` topic for it — turning it off cuts power to the NAS, which kills the
- * MQTT broker itself and makes remote recovery impossible. There is deliberately
- * no NAS_SET_TOPIC constant so nothing can switch it off.
+ * nasSwitch is MONITOR-ONLY. Never publish to a `…/set` topic for it — turning
+ * it off cuts power to the NAS and the broker itself. There is deliberately no
+ * NAS_SET_TOPIC constant.
  */
 export const NAS_STATE_TOPIC = 'zigbee2mqtt/nasSwitch';
 export const NAS_GET_TOPIC = 'zigbee2mqtt/nasSwitch/get';
 
 export const ENERGY_UNIT = 'kWh';
 export const DEFAULT_CURRENCY = '€';
-
-export interface PingHost extends DisplayHost {
-  port: number;
-  /**
-   * When true, only a real (open-port) connection counts as reachable — a
-   * refused/reset connection is treated as "not up yet". Use this to detect a
-   * service actually being ready (e.g. the VM's SSH) rather than just the host
-   * answering, so it reports online only once it has genuinely booted.
-   */
-  strict?: boolean;
-}
-
-/**
- * Hosts checked by TCP, below the NAS in the hierarchy. The NAS itself is not
- * here — it's derived from the persistent MQTT connection, which is far more
- * reliable than repeatedly opening throwaway sockets to the broker.
- */
-export const PING_HOSTS: PingHost[] = [
-  { key: 'pve', label: 'pve', host: '100.111.213.5', port: 8006 }, // Proxmox web UI
-  { key: 'vm', label: 'Ubuntu VM', host: '100.111.150.88', port: 22, strict: true }, // SSH ready
-];
 
 /** How often to re-check pve / VM reachability. */
 export const REACH_INTERVAL_MS = 2000;
