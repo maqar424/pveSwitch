@@ -47,10 +47,12 @@ function encodeString(value: string): Buffer {
 const PINGREQ = Buffer.from([0xc0, 0x00]);
 const DISCONNECT = Buffer.from([0xe0, 0x00]);
 const RECONNECT_DELAY_MS = 3000;
-// Bound only the CONNACK wait, armed AFTER the TCP socket connects. The TCP
-// connect itself stays uncapped — over Tailscale a cold dial can take several
-// seconds, and capping it tore down valid handshakes (NAS stuck "disconnected").
-const CONNACK_TIMEOUT_MS = 10000;
+// Overall connect+handshake timeout, armed immediately when a connect starts.
+// A hung TCP connect (e.g. dialing a Tailscale IP whose route isn't up yet) emits
+// no error and never fires the connect callback, so without this the reconnect
+// loop stalls forever and only an app restart recovers. 10s leaves room for a
+// slow cold Tailscale dial while still keeping the loop alive.
+const CONNECT_TIMEOUT_MS = 10000;
 
 export class MqttClient {
   private socket?: Socket;
@@ -77,14 +79,7 @@ export class MqttClient {
     try {
       const socket = TcpSocket.createConnection(
         { host: this.options.host, port: this.options.port },
-        () => {
-          // TCP is connected — send CONNECT and bound only the CONNACK wait.
-          socket.write(this.buildConnect(clientId));
-          this.stopConnectTimer();
-          this.connectTimer = setTimeout(() => {
-            if (!this.connected) this.handleDrop();
-          }, CONNACK_TIMEOUT_MS);
-        },
+        () => socket.write(this.buildConnect(clientId)),
       );
       this.socket = socket;
       socket.on('data', (data: unknown) => this.onData(data as Buffer | string));
@@ -93,7 +88,15 @@ export class MqttClient {
     } catch {
       // createConnection can throw synchronously when the network is down.
       this.scheduleReconnect();
+      return;
     }
+
+    // Abort & retry if the connect/handshake hasn't completed in time. Armed now
+    // (not after TCP connects) so a HUNG connect is still retried — otherwise the
+    // app stays "offline" until a full restart when Tailscale comes up late.
+    this.connectTimer = setTimeout(() => {
+      if (!this.connected) this.handleDrop();
+    }, CONNECT_TIMEOUT_MS);
   }
 
   disconnect(): void {
