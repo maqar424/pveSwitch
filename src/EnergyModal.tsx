@@ -16,12 +16,13 @@ import {
   buildBuckets,
   formatNumber,
   formatValue,
+  priceAt,
   SERIES,
   totals,
   type Duration,
   type Metric,
 } from './aggregate';
-import { type PveData } from './storage';
+import { dayKey, type PveData } from './storage';
 
 type Viz = 'line' | 'bar';
 
@@ -46,6 +47,7 @@ export function EnergyModal({
   const [duration, setDuration] = useState<Duration>('total');
   const [viz, setViz] = useState<Viz>('line');
 
+  const [editingPrice, setEditingPrice] = useState(false);
   const [priceInput, setPriceInput] = useState('');
   const [startDate, setStartDate] = useState<string | null>(null);
   const [endDate, setEndDate] = useState<string | null>(null);
@@ -62,6 +64,7 @@ export function EnergyModal({
   const buckets = buildBuckets(data, duration, metric, now);
   const t = totals(data, metric, prefix);
   const currency = data.currency;
+  const currentPrice = priceAt(data.prices, dayKey());
 
   const onAdd = () => {
     const p = parseFloat(priceInput.replace(',', '.'));
@@ -133,58 +136,79 @@ export function EnergyModal({
 
             <View style={styles.divider} />
 
-            <View style={styles.priceHeader}>
-              <Text style={styles.sectionTitle}>Price per kWh</Text>
-              <View style={styles.currencyBox}>
-                <Text style={styles.currencyLabel}>Currency</Text>
-                <TextInput
-                  value={currency}
-                  onChangeText={(v) => setCurrency(v.slice(0, 3) || '€')}
-                  style={styles.currencyInput}
-                  maxLength={3}
-                  placeholderTextColor={C.textTertiary}
-                />
+            {!editingPrice ? (
+              <View style={styles.collapsedPrice}>
+                <Text style={styles.collapsedText}>
+                  {data.prices.length === 0
+                    ? 'Price per kWh is not set'
+                    : `Price per kWh is ${formatNumber(currentPrice)} ${currency}`}
+                </Text>
+                <Pressable onPress={() => setEditingPrice(true)} style={styles.editBtn} hitSlop={6}>
+                  <Feather name="edit-2" size={13} color={C.textPrimary} />
+                  <Text style={styles.editText}>Edit</Text>
+                </Pressable>
               </View>
-            </View>
-
-            <View style={styles.dateRow}>
-              <DateField label="Start" display={startDate ?? 'Beginning'} onPress={() => setPickerMode('start')} />
-              <Feather name="arrow-right" size={16} color={C.textTertiary} />
-              <DateField label="End" display={endDate ?? 'Current'} onPress={() => setPickerMode('end')} />
-            </View>
-
-            <View style={styles.addRow}>
-              <TextInput
-                value={priceInput}
-                onChangeText={setPriceInput}
-                placeholder={`0,30 ${currency}`}
-                placeholderTextColor={C.textTertiary}
-                keyboardType="decimal-pad"
-                style={styles.priceInput}
-              />
-              <Pressable onPress={onAdd} style={styles.addBtn}>
-                <Feather name="plus" size={18} color="#0b0d12" />
-              </Pressable>
-            </View>
-
-            {data.prices.length === 0 ? (
-              <Text style={styles.noPrices}>No prices set — costs show as 0 until you add one.</Text>
             ) : (
-              [...data.prices]
-                .sort((a, b) => (a.start ?? '').localeCompare(b.start ?? ''))
-                .map((p) => (
-                  <View key={p.id} style={styles.priceRow}>
-                    <Text style={styles.priceFrom}>
-                      {(p.start ?? 'Beginning') + ' → ' + (p.end ?? 'Current')}
-                    </Text>
-                    <Text style={styles.priceValue}>
-                      {formatNumber(p.price)} {currency}
-                    </Text>
-                    <Pressable onPress={() => removePrice(p.id)} hitSlop={8}>
-                      <Feather name="trash-2" size={16} color={C.textTertiary} />
-                    </Pressable>
-                  </View>
-                ))
+              <>
+                <View style={styles.priceHeader}>
+                  <Text style={styles.sectionTitle}>Price per kWh</Text>
+                  <Pressable onPress={() => setEditingPrice(false)} style={styles.hideBtn} hitSlop={6}>
+                    <Feather name="chevron-down" size={16} color={C.textSecondary} />
+                    <Text style={styles.hideText}>Hide</Text>
+                  </Pressable>
+                </View>
+
+                <View style={styles.currencyRow}>
+                  <Text style={styles.currencyLabel}>Currency</Text>
+                  <TextInput
+                    value={currency}
+                    onChangeText={(v) => setCurrency(v.slice(0, 3) || '€')}
+                    style={styles.currencyInput}
+                    maxLength={3}
+                    placeholderTextColor={C.textTertiary}
+                  />
+                </View>
+
+                <View style={styles.dateRow}>
+                  <DateField label="Start" display={startDate ?? 'Beginning'} onPress={() => setPickerMode('start')} />
+                  <Feather name="arrow-right" size={16} color={C.textTertiary} />
+                  <DateField label="End" display={endDate ?? 'Current'} onPress={() => setPickerMode('end')} />
+                </View>
+
+                <View style={styles.addRow}>
+                  <TextInput
+                    value={priceInput}
+                    onChangeText={setPriceInput}
+                    placeholder={`0,30 ${currency}`}
+                    placeholderTextColor={C.textTertiary}
+                    keyboardType="decimal-pad"
+                    style={styles.priceInput}
+                  />
+                  <Pressable onPress={onAdd} style={styles.addBtn}>
+                    <Feather name="plus" size={18} color="#0b0d12" />
+                  </Pressable>
+                </View>
+
+                {data.prices.length === 0 ? (
+                  <Text style={styles.noPrices}>No prices set — costs show as 0 until you add one.</Text>
+                ) : (
+                  [...data.prices]
+                    .sort((a, b) => (a.start ?? '').localeCompare(b.start ?? ''))
+                    .map((p) => (
+                      <View key={p.id} style={styles.priceRow}>
+                        <Text style={styles.priceFrom}>
+                          {(p.start ?? 'Beginning') + ' → ' + (p.end ?? 'Current')}
+                        </Text>
+                        <Text style={styles.priceValue}>
+                          {formatNumber(p.price)} {currency}
+                        </Text>
+                        <Pressable onPress={() => removePrice(p.id)} hitSlop={8}>
+                          <Feather name="trash-2" size={16} color={C.textTertiary} />
+                        </Pressable>
+                      </View>
+                    ))
+                )}
+              </>
             )}
           </ScrollView>
         </View>
@@ -341,6 +365,51 @@ const styles = StyleSheet.create({
     height: 1,
     backgroundColor: C.border,
     marginVertical: 6,
+  },
+  collapsedPrice: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+    paddingVertical: 2,
+  },
+  collapsedText: {
+    flexShrink: 1,
+    color: C.textPrimary,
+    fontSize: 15,
+    fontWeight: '500',
+    fontVariant: ['tabular-nums'],
+  },
+  editBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingVertical: 7,
+    paddingHorizontal: 14,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: C.border,
+    backgroundColor: C.surface,
+  },
+  editText: {
+    color: C.textPrimary,
+    fontSize: 13,
+    fontWeight: '500',
+  },
+  hideBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  hideText: {
+    color: C.textSecondary,
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  currencyRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
   },
   priceHeader: {
     flexDirection: 'row',
