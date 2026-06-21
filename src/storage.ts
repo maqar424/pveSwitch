@@ -15,7 +15,7 @@ import {
   type ServerKey,
   type SshConfig,
 } from './config';
-import { decryptString, encryptString, peekKey, secureStoreRoundTrip } from './crypto';
+import { cryptoRoundTrip, decryptString, encryptString, peekKey, secureStoreRoundTrip } from './crypto';
 
 const FILE_NAME = 'pveswitch-data.json';
 const DATA_VERSION = 5;
@@ -215,16 +215,35 @@ export async function storageDiag(): Promise<string[]> {
     out.push('key: ERR ' + String(e));
   }
   out.push('ss-roundtrip: ' + (await secureStoreRoundTrip()));
+  out.push('crypto: ' + (await cryptoRoundTrip()));
+  out.push('save: ' + lastSaveInfo);
   return out;
 }
 
+let lastSaveInfo = 'not-saved';
+export function getLastSaveInfo(): string {
+  return lastSaveInfo;
+}
+
 export async function saveData(data: PveData): Promise<void> {
+  // Persist the data no matter what: encrypt when crypto-js works, but fall back
+  // to a plain write if it throws — a failed encrypt must not silently drop the
+  // save (which is exactly what lost the IPs before). loadData reads either form.
+  const json = JSON.stringify(data);
+  let content = json;
+  let note = 'plaintext';
   try {
-    const ciphertext = await encryptString(JSON.stringify(data));
+    content = await encryptString(json);
+    note = 'encrypted';
+  } catch (e) {
+    note = 'plaintext (encrypt threw: ' + String(e) + ')';
+  }
+  try {
     const file = fileRef();
     if (!file.exists) file.create();
-    file.write(ciphertext);
-  } catch {
-    // ignore write failures
+    file.write(content);
+    lastSaveInfo = `wrote ${note} len=${content.length}`;
+  } catch (e) {
+    lastSaveInfo = `write FAILED (${note}): ` + String(e);
   }
 }

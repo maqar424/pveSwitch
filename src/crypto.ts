@@ -52,6 +52,18 @@ export function peekKey(): Promise<string | null> {
   return SecureStore.getItemAsync(KEY_NAME);
 }
 
+/** Verifies crypto-js encrypt+decrypt actually works in this JS runtime. */
+export async function cryptoRoundTrip(): Promise<string> {
+  try {
+    const sample = JSON.stringify({ t: Date.now(), s: 'pveSwitch' });
+    const ct = await encryptString(sample);
+    const pt = await decryptString(ct);
+    return pt === sample ? `OK (ct "${ct.slice(0, 6)}")` : `MISMATCH (ct "${ct.slice(0, 6)}")`;
+  } catch (e) {
+    return 'THROW ' + String(e);
+  }
+}
+
 /** Verifies secure-store can write+read within this session. */
 export async function secureStoreRoundTrip(): Promise<string> {
   try {
