@@ -3,6 +3,7 @@
  * the OS secure keystore (expo-secure-store), generated once on first use.
  * crypto-js handles the AES + salt; the work is trivial for a few KB of JSON.
  */
+import './cryptoPolyfill'; // must precede crypto-js so its CSPRNG is available
 import * as SecureStore from 'expo-secure-store';
 import * as Crypto from 'expo-crypto';
 import { Buffer } from 'buffer';

@@ -10,11 +10,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { MqttClient } from './mqtt';
 import { GET_TOPIC, NAS_GET_TOPIC, NAS_STATE_TOPIC, SET_TOPIC, STATE_TOPIC } from './config';
+import { tcpPing } from './ping';
 import type { Reach } from './useReachability';
 
 export type PlugState = 'on' | 'off' | null;
 
 const NAS_GRACE_MS = 5000;
+const PROBE_INTERVAL_MS = 4000;
 
 export interface PlugApi {
   nas: Reach;
@@ -99,6 +101,27 @@ export function usePlug({ hosts, port }: { hosts: string[]; port: number }): Plu
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hostsKey, port, startGrace]);
+
+  // Recover when connectivity returns (e.g. Tailscale comes up after the app
+  // launched offline): while disconnected, probe the broker directly and force a
+  // fresh connect once it answers. The socket-level retry can wedge on Android
+  // after dialing unreachable Tailscale IPs, leaving the app offline until a
+  // manual restart — this is the bridge that gets it back without one.
+  useEffect(() => {
+    if (connected || hosts.length === 0) return;
+    let active = true;
+    const id = setInterval(async () => {
+      const checks = await Promise.all(hosts.map((h) => tcpPing(h, port, 2000)));
+      if (active && checks.some(Boolean) && !clientRef.current?.isConnected()) {
+        clientRef.current?.reconnect();
+      }
+    }, PROBE_INTERVAL_MS);
+    return () => {
+      active = false;
+      clearInterval(id);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [connected, hostsKey, port]);
 
   useEffect(() => {
     setPending(false);

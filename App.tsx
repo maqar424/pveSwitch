@@ -17,7 +17,6 @@ import Svg, { Circle } from 'react-native-svg';
 const AnimatedCircle = Animated.createAnimatedComponent(Circle);
 
 import { BROKER_PORT, SERVERS } from './src/config';
-import { openTailscale } from './src/tailscale';
 import { usePlug } from './src/usePlug';
 import { useReachability, type Reach } from './src/useReachability';
 import { useStore } from './src/useStore';
@@ -287,20 +286,12 @@ export default function App() {
 
       <View style={styles.statusCard}>
         {nas === 'down' && (
-          <Pressable
-            style={({ pressed }) => [styles.hint, { opacity: pressed ? 0.6 : 1 }]}
-            onPress={() => {
-              Haptics.selectionAsync();
-              void openTailscale();
-            }}
-          >
+          <View style={styles.hint}>
             <Feather name="alert-triangle" size={13} color={COL.checking} />
             <Text style={styles.hintText}>
-              Can&rsquo;t reach your network —{' '}
-              <Text style={styles.hintLink}>Click here to open Tailscale</Text>
+              Can&rsquo;t reach your network — open Tailscale, connect, then retry.
             </Text>
-            <Feather name="external-link" size={12} color={COL.checking} />
-          </Pressable>
+          </View>
         )}
         <Pressable onPress={onOpenServers} style={({ pressed }) => ({ opacity: pressed ? 0.7 : 1 })}>
           {rows.map((row) => (
