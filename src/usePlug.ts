@@ -8,15 +8,16 @@
  * monitor-only.
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
+import NetInfo from '@react-native-community/netinfo';
 import { MqttClient } from './mqtt';
 import { GET_TOPIC, NAS_GET_TOPIC, NAS_STATE_TOPIC, SET_TOPIC, STATE_TOPIC } from './config';
-import { tcpPing } from './ping';
 import type { Reach } from './useReachability';
 
 export type PlugState = 'on' | 'off' | null;
 
 const NAS_GRACE_MS = 5000;
-const PROBE_INTERVAL_MS = 4000;
+// Backstop for rebuilding the connection while offline, if no OS network event fires.
+const RETRY_MS = 12000;
 
 export interface PlugApi {
   nas: Reach;
@@ -36,10 +37,13 @@ export function usePlug({ hosts, port }: { hosts: string[]; port: number }): Plu
   const [pveEnergy, setPveEnergy] = useState<number | null>(null);
   const [nasEnergy, setNasEnergy] = useState<number | null>(null);
   const [pending, setPending] = useState(false);
+  const [generation, setGeneration] = useState(0);
 
   const clientRef = useRef<MqttClient | null>(null);
   const pendingTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const graceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const connectedRef = useRef(connected);
+  connectedRef.current = connected;
 
   const startGrace = useCallback(() => {
     if (graceTimer.current) clearTimeout(graceTimer.current);
@@ -100,28 +104,28 @@ export function usePlug({ hosts, port }: { hosts: string[]; port: number }): Plu
       if (graceTimer.current) clearTimeout(graceTimer.current);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hostsKey, port, startGrace]);
+  }, [hostsKey, port, generation, startGrace]);
 
-  // Recover when connectivity returns (e.g. Tailscale comes up after the app
-  // launched offline): while disconnected, probe the broker directly and force a
-  // fresh connect once it answers. The socket-level retry can wedge on Android
-  // after dialing unreachable Tailscale IPs, leaving the app offline until a
-  // manual restart — this is the bridge that gets it back without one.
+  // Rebuild the whole connection when the OS reports the network changed while
+  // we're offline — this is what catches Tailscale coming up after the app
+  // launched, without polling. A slow timer is the backstop if no event fires.
+  // Bumping `generation` tears down the old client and creates a brand-new one
+  // (the reliable equivalent of relaunching the app, which was the only recovery
+  // before). Guarded by connectedRef so a live connection is never disturbed.
   useEffect(() => {
-    if (connected || hosts.length === 0) return;
-    let active = true;
-    const id = setInterval(async () => {
-      const checks = await Promise.all(hosts.map((h) => tcpPing(h, port, 2000)));
-      if (active && checks.some(Boolean) && !clientRef.current?.isConnected()) {
-        clientRef.current?.reconnect();
-      }
-    }, PROBE_INTERVAL_MS);
+    const rebuild = () => {
+      if (!connectedRef.current && hosts.length > 0) setGeneration((g) => g + 1);
+    };
+    const unsub = NetInfo.addEventListener((s) => {
+      if (s.isConnected) rebuild();
+    });
+    const id = setInterval(rebuild, RETRY_MS);
     return () => {
-      active = false;
+      unsub();
       clearInterval(id);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [connected, hostsKey, port]);
+  }, [hostsKey]);
 
   useEffect(() => {
     setPending(false);

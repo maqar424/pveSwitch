@@ -10,8 +10,10 @@ import {
 } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 
-import { DEFAULT_SSH, SERVERS, type ServerKey, type SshConfig } from './config';
+import NetInfo from '@react-native-community/netinfo';
+import { BROKER_PORT, DEFAULT_SSH, SERVERS, type ServerKey, type SshConfig } from './config';
 import { storageDiag } from './storage';
+import { tcpPing } from './ping';
 
 type IpMap = Record<ServerKey, string[]>;
 
@@ -36,6 +38,7 @@ export function ServerModal({
   const [sshPassword, setSshPassword] = useState(ssh.password);
   const [sshCommand, setSshCommand] = useState(ssh.command);
   const [diag, setDiag] = useState<string[]>([]);
+  const [netDiag, setNetDiag] = useState<string[]>([]);
 
   useEffect(() => {
     if (!visible) return;
@@ -46,6 +49,35 @@ export function ServerModal({
     setSshCommand(ssh.command);
     storageDiag().then(setDiag);
   }, [visible, servers, ssh]);
+
+  useEffect(() => {
+    if (!visible) return;
+    let active = true;
+    (async () => {
+      const lines: string[] = [];
+      try {
+        const ni = await NetInfo.fetch();
+        lines.push(`net: ${ni.type} conn=${ni.isConnected} inet=${ni.isInternetReachable}`);
+      } catch (e) {
+        lines.push('net: ERR ' + String(e));
+      }
+      const nas = servers.nas ?? [];
+      if (nas.length === 0) {
+        lines.push('broker-ping: (no nas IPs)');
+      } else {
+        try {
+          const checks = await Promise.all(nas.map((ip) => tcpPing(ip, BROKER_PORT, 2500)));
+          lines.push('broker-ping: ' + nas.map((ip, i) => `${ip}=${checks[i] ? 'OK' : 'no'}`).join('  '));
+        } catch (e) {
+          lines.push('broker-ping: ERR ' + String(e));
+        }
+      }
+      if (active) setNetDiag(lines);
+    })();
+    return () => {
+      active = false;
+    };
+  }, [visible, servers]);
 
   const setIp = (key: ServerKey, index: number, value: string) =>
     setLocal((prev) => ({ ...prev, [key]: prev[key].map((ip, i) => (i === index ? value : ip)) }));
@@ -183,6 +215,11 @@ export function ServerModal({
               <Text style={styles.blockTitle}>Storage debug (temporary)</Text>
               {diag.map((line, i) => (
                 <Text key={i} style={styles.debugLine}>
+                  {line}
+                </Text>
+              ))}
+              {netDiag.map((line, i) => (
+                <Text key={`n${i}`} style={styles.debugLine}>
                   {line}
                 </Text>
               ))}
