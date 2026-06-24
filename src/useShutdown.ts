@@ -1,13 +1,13 @@
 /**
  * Graceful pve shutdown flow:
- *   idle → sending (SSH) → waiting (poll pve reachability) → cut power → idle
- * `error` if the SSH connect fails. While waiting, power is cut once pve has
- * been unreachable for a short confirm window, or after a hard time cap. The
- * caller can `forceOff()` at any point to cut power immediately.
+ *   idle → sending (HTTP) → waiting (poll pve reachability) → cut power → idle
+ * `error` if the shutdown service can't be reached. While waiting, power is cut
+ * once pve has been unreachable for a short confirm window, or after a hard time
+ * cap. The caller can `forceOff()` at any point to cut power immediately.
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { runRemoteShutdown } from './ssh';
-import type { SshConfig } from './config';
+import { runRemoteShutdown } from './shutdown';
+import type { ShutdownConfig } from './config';
 import type { Reach } from './useReachability';
 
 const DOWN_CONFIRM_MS = 10000; // pve must look down this long before we cut power
@@ -25,10 +25,10 @@ export interface ShutdownApi {
 export function useShutdown(params: {
   pveReach: Reach;
   pveHosts: string[];
-  ssh: SshConfig;
+  shutdown: ShutdownConfig;
   powerOff: () => void;
 }): ShutdownApi {
-  const { pveReach, pveHosts, ssh, powerOff } = params;
+  const { pveReach, pveHosts, shutdown, powerOff } = params;
 
   const [phase, setPhase] = useState<ShutdownPhase>('idle');
   const [error, setError] = useState<string | null>(null);
@@ -44,17 +44,15 @@ export function useShutdown(params: {
     try {
       await runRemoteShutdown({
         hosts: pveHosts,
-        port: ssh.port,
-        user: ssh.user,
-        password: ssh.password,
-        command: ssh.command,
+        port: shutdown.port,
+        token: shutdown.token,
       });
       setPhase('waiting');
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'SSH connection failed');
+      setError(e instanceof Error ? e.message : 'Shutdown failed');
       setPhase('error');
     }
-  }, [pveHosts, ssh.port, ssh.user, ssh.password, ssh.command]);
+  }, [pveHosts, shutdown.port, shutdown.token]);
 
   const forceOff = useCallback(() => {
     powerOffRef.current();

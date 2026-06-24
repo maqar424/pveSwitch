@@ -10,10 +10,7 @@ import {
 } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 
-import NetInfo from '@react-native-community/netinfo';
-import { BROKER_PORT, DEFAULT_SSH, SERVERS, type ServerKey, type SshConfig } from './config';
-import { storageDiag } from './storage';
-import { tcpPing } from './ping';
+import { DEFAULT_SHUTDOWN, SERVERS, type ServerKey, type ShutdownConfig } from './config';
 
 type IpMap = Record<ServerKey, string[]>;
 
@@ -23,61 +20,25 @@ export function ServerModal({
   visible,
   onClose,
   servers,
-  ssh,
+  shutdown,
   onSave,
 }: {
   visible: boolean;
   onClose: () => void;
   servers: IpMap;
-  ssh: SshConfig;
-  onSave: (servers: IpMap, ssh: SshConfig) => void;
+  shutdown: ShutdownConfig;
+  onSave: (servers: IpMap, shutdown: ShutdownConfig) => void;
 }) {
   const [local, setLocal] = useState<IpMap>(() => clone(servers));
-  const [sshUser, setSshUser] = useState(ssh.user);
-  const [sshPort, setSshPort] = useState(String(ssh.port));
-  const [sshPassword, setSshPassword] = useState(ssh.password);
-  const [sshCommand, setSshCommand] = useState(ssh.command);
-  const [diag, setDiag] = useState<string[]>([]);
-  const [netDiag, setNetDiag] = useState<string[]>([]);
+  const [shutdownPort, setShutdownPort] = useState(String(shutdown.port));
+  const [shutdownToken, setShutdownToken] = useState(shutdown.token);
 
   useEffect(() => {
     if (!visible) return;
     setLocal(clone(servers));
-    setSshUser(ssh.user);
-    setSshPort(String(ssh.port));
-    setSshPassword(ssh.password);
-    setSshCommand(ssh.command);
-    storageDiag().then(setDiag);
-  }, [visible, servers, ssh]);
-
-  useEffect(() => {
-    if (!visible) return;
-    let active = true;
-    (async () => {
-      const lines: string[] = [];
-      try {
-        const ni = await NetInfo.fetch();
-        lines.push(`net: ${ni.type} conn=${ni.isConnected} inet=${ni.isInternetReachable}`);
-      } catch (e) {
-        lines.push('net: ERR ' + String(e));
-      }
-      const nas = servers.nas ?? [];
-      if (nas.length === 0) {
-        lines.push('broker-ping: (no nas IPs)');
-      } else {
-        try {
-          const checks = await Promise.all(nas.map((ip) => tcpPing(ip, BROKER_PORT, 2500)));
-          lines.push('broker-ping: ' + nas.map((ip, i) => `${ip}=${checks[i] ? 'OK' : 'no'}`).join('  '));
-        } catch (e) {
-          lines.push('broker-ping: ERR ' + String(e));
-        }
-      }
-      if (active) setNetDiag(lines);
-    })();
-    return () => {
-      active = false;
-    };
-  }, [visible, servers]);
+    setShutdownPort(String(shutdown.port));
+    setShutdownToken(shutdown.token);
+  }, [visible, servers, shutdown]);
 
   const setIp = (key: ServerKey, index: number, value: string) =>
     setLocal((prev) => ({ ...prev, [key]: prev[key].map((ip, i) => (i === index ? value : ip)) }));
@@ -87,10 +48,8 @@ export function ServerModal({
 
   const dirty =
     JSON.stringify(local) !== JSON.stringify(servers) ||
-    sshUser !== ssh.user ||
-    sshPort !== String(ssh.port) ||
-    sshPassword !== ssh.password ||
-    sshCommand !== ssh.command;
+    shutdownPort !== String(shutdown.port) ||
+    shutdownToken !== shutdown.token;
 
   const save = () => {
     const cleaned: IpMap = {
@@ -98,14 +57,12 @@ export function ServerModal({
       pve: local.pve.map((s) => s.trim()).filter(Boolean),
       vm: local.vm.map((s) => s.trim()).filter(Boolean),
     };
-    const port = parseInt(sshPort, 10);
-    const cleanedSsh: SshConfig = {
-      user: sshUser.trim() || DEFAULT_SSH.user,
-      port: Number.isFinite(port) && port > 0 ? port : DEFAULT_SSH.port,
-      password: sshPassword,
-      command: sshCommand.trim() || DEFAULT_SSH.command,
+    const port = parseInt(shutdownPort, 10);
+    const cleanedShutdown: ShutdownConfig = {
+      port: Number.isFinite(port) && port > 0 ? port : DEFAULT_SHUTDOWN.port,
+      token: shutdownToken.trim(),
     };
-    onSave(cleaned, cleanedSsh);
+    onSave(cleaned, cleanedShutdown);
     onClose();
   };
 
@@ -159,73 +116,31 @@ export function ServerModal({
             ))}
 
             <View style={styles.block}>
-              <Text style={styles.blockTitle}>Graceful shutdown (SSH)</Text>
+              <Text style={styles.blockTitle}>Graceful shutdown</Text>
               <Text style={styles.dim}>
-                Safely shuts down pve before cutting power. Leave the password empty to just cut power.
+                Tells the pve host to shut down before power is cut, via the helper service on pve
+                (over Tailscale). Leave the token empty to just cut power.
               </Text>
-              <View style={styles.fieldRow}>
-                <View style={{ flex: 2 }}>
-                  <Text style={styles.fieldLabel}>User</Text>
-                  <TextInput
-                    value={sshUser}
-                    onChangeText={setSshUser}
-                    placeholder="root"
-                    placeholderTextColor={C.textTertiary}
-                    autoCapitalize="none"
-                    autoCorrect={false}
-                    style={styles.input}
-                  />
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.fieldLabel}>Port</Text>
-                  <TextInput
-                    value={sshPort}
-                    onChangeText={setSshPort}
-                    placeholder="22"
-                    placeholderTextColor={C.textTertiary}
-                    keyboardType="number-pad"
-                    style={styles.input}
-                  />
-                </View>
-              </View>
-              <Text style={styles.fieldLabel}>Password</Text>
+              <Text style={styles.fieldLabel}>Port</Text>
               <TextInput
-                value={sshPassword}
-                onChangeText={setSshPassword}
-                placeholder="(SSH password)"
+                value={shutdownPort}
+                onChangeText={setShutdownPort}
+                placeholder="8723"
+                placeholderTextColor={C.textTertiary}
+                keyboardType="number-pad"
+                style={styles.input}
+              />
+              <Text style={styles.fieldLabel}>Token</Text>
+              <TextInput
+                value={shutdownToken}
+                onChangeText={setShutdownToken}
+                placeholder="(shutdown token)"
                 placeholderTextColor={C.textTertiary}
                 secureTextEntry
                 autoCapitalize="none"
                 autoCorrect={false}
                 style={styles.input}
               />
-              <Text style={styles.fieldLabel}>Command</Text>
-              <TextInput
-                value={sshCommand}
-                onChangeText={setSshCommand}
-                placeholder="shutdown -h now"
-                placeholderTextColor={C.textTertiary}
-                autoCapitalize="none"
-                autoCorrect={false}
-                style={styles.input}
-              />
-            </View>
-
-            <View style={styles.block}>
-              <Text style={styles.blockTitle}>Storage debug (temporary)</Text>
-              {diag.map((line, i) => (
-                <Text key={i} style={styles.debugLine}>
-                  {line}
-                </Text>
-              ))}
-              {netDiag.map((line, i) => (
-                <Text key={`n${i}`} style={styles.debugLine}>
-                  {line}
-                </Text>
-              ))}
-              <Text style={styles.debugLine}>loaded nas: {servers.nas.join(', ') || '(none)'}</Text>
-              <Text style={styles.debugLine}>loaded pve: {servers.pve.join(', ') || '(none)'}</Text>
-              <Text style={styles.debugLine}>loaded vm: {servers.vm.join(', ') || '(none)'}</Text>
             </View>
           </ScrollView>
 
@@ -318,12 +233,6 @@ const styles = StyleSheet.create({
     fontSize: 13,
     lineHeight: 18,
   },
-  debugLine: {
-    color: C.textSecondary,
-    fontSize: 12,
-    fontFamily: 'monospace',
-    lineHeight: 17,
-  },
   row: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -353,10 +262,6 @@ const styles = StyleSheet.create({
     color: C.accent,
     fontSize: 14,
     fontWeight: '500',
-  },
-  fieldRow: {
-    flexDirection: 'row',
-    gap: 8,
   },
   fieldLabel: {
     color: C.textTertiary,

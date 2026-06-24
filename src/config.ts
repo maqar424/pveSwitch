@@ -34,19 +34,19 @@ export const DEFAULT_SERVER_IPS: Record<ServerKey, string[]> = {
   vm: ['100.111.150.88'],
 };
 
-/** SSH details for the graceful pve shutdown (connects to a reachable pve IP). */
-export interface SshConfig {
-  user: string;
+/**
+ * Graceful pve shutdown via a small token-protected HTTP service running on the
+ * pve host (POST /shutdown over Tailscale). `port` is that service's port; an
+ * empty `token` disables graceful shutdown (off just cuts power).
+ */
+export interface ShutdownConfig {
   port: number;
-  password: string;
-  command: string;
+  token: string;
 }
 
-export const DEFAULT_SSH: SshConfig = {
-  user: 'root',
-  port: 22,
-  password: '',
-  command: 'shutdown -h now',
+export const DEFAULT_SHUTDOWN: ShutdownConfig = {
+  port: 8723,
+  token: '',
 };
 
 /** Zigbee2MQTT topics for the pve switch (which we control). */

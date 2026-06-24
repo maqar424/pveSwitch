@@ -11,14 +11,14 @@ import { File, Paths } from 'expo-file-system';
 import {
   DEFAULT_CURRENCY,
   DEFAULT_SERVER_IPS,
-  DEFAULT_SSH,
+  DEFAULT_SHUTDOWN,
   type ServerKey,
-  type SshConfig,
+  type ShutdownConfig,
 } from './config';
-import { cryptoRoundTrip, decryptString, encryptString, peekKey, secureStoreRoundTrip } from './crypto';
+import { decryptString, encryptString } from './crypto';
 
 const FILE_NAME = 'pveswitch-data.json';
-const DATA_VERSION = 5;
+const DATA_VERSION = 6;
 
 let idCounter = 0;
 export function genId(): string {
@@ -48,8 +48,8 @@ export interface PveData {
   currency: string;
   /** Per-server candidate IPs (the app uses whichever is reachable). */
   servers: Record<ServerKey, string[]>;
-  /** SSH details for the graceful pve shutdown. */
-  ssh: SshConfig;
+  /** Graceful pve shutdown service (port + token). */
+  shutdown: ShutdownConfig;
 }
 
 const emptySeries = (): EnergySeries => ({ baseline: null, baselineAt: null, byDay: {} });
@@ -63,7 +63,7 @@ export const emptyData = (): PveData => ({
   prices: [],
   currency: DEFAULT_CURRENCY,
   servers: { nas: [], pve: [], vm: [] },
-  ssh: DEFAULT_SSH,
+  shutdown: DEFAULT_SHUTDOWN,
 });
 
 function fileRef(): File {
@@ -122,14 +122,12 @@ function normalizeServers(s: unknown): Record<ServerKey, string[]> {
   return { nas: pick('nas'), pve: pick('pve'), vm: pick('vm') };
 }
 
-function normalizeSsh(s: unknown): SshConfig {
+function normalizeShutdown(s: unknown): ShutdownConfig {
   const o = (s ?? {}) as Record<string, any>;
   const port = Number(o.port);
   return {
-    user: typeof o.user === 'string' && o.user ? o.user : DEFAULT_SSH.user,
-    port: Number.isFinite(port) && port > 0 ? port : DEFAULT_SSH.port,
-    password: typeof o.password === 'string' ? o.password : DEFAULT_SSH.password,
-    command: typeof o.command === 'string' && o.command ? o.command : DEFAULT_SSH.command,
+    port: Number.isFinite(port) && port > 0 ? port : DEFAULT_SHUTDOWN.port,
+    token: typeof o.token === 'string' ? o.token : DEFAULT_SHUTDOWN.token,
   };
 }
 
@@ -146,14 +144,14 @@ function migrate(parsed: unknown): PveData {
       prices: normalizePrices(p.prices),
       currency: typeof p.currency === 'string' ? p.currency : DEFAULT_CURRENCY,
       servers: normalizeServers(p.servers),
-      ssh: normalizeSsh(p.ssh),
+      shutdown: normalizeShutdown(p.shutdown),
       version: DATA_VERSION,
     };
   }
 
   // v1 shape, or a brand-new install: start from defaults.
   base.servers = normalizeServers(p.servers);
-  base.ssh = normalizeSsh(p.ssh);
+  base.shutdown = normalizeShutdown(p.shutdown);
   if (Array.isArray(p.bootTimes)) base.bootTimes = p.bootTimes;
   if (p.energyByDay || typeof p.energyBaseline === 'number') {
     base.pve = {
@@ -165,85 +163,37 @@ function migrate(parsed: unknown): PveData {
   return base;
 }
 
-let lastLoadInfo = 'not-loaded';
-export function getLastLoadInfo(): string {
-  return lastLoadInfo;
-}
-
 export async function loadData(): Promise<PveData> {
   try {
     const file = fileRef();
-    if (!file.exists) {
-      lastLoadInfo = 'no-file';
-      return migrate({});
-    }
+    if (!file.exists) return migrate({});
     const raw = file.textSync();
     // Encrypted files are base64 ("U2FsdGVk…"); legacy files are plain JSON ("{").
     const isPlain = raw.trimStart().startsWith('{');
     const json = isPlain ? raw : await decryptString(raw);
-    if (!json) {
-      lastLoadInfo = `decrypt-empty (raw ${raw.length})`;
-      return migrate({});
-    }
-    const result = migrate(JSON.parse(json));
-    lastLoadInfo = isPlain ? 'plaintext-ok' : 'decrypt-ok';
-    return result;
-  } catch (e) {
-    lastLoadInfo = 'error: ' + String(e);
+    if (!json) return migrate({});
+    return migrate(JSON.parse(json));
+  } catch {
     return migrate({});
   }
-}
-
-/** Temporary: reports the state of each persistence layer to locate the bug. */
-export async function storageDiag(): Promise<string[]> {
-  const out: string[] = [`load: ${lastLoadInfo}`];
-  try {
-    const f = fileRef();
-    if (f.exists) {
-      const t = f.textSync();
-      out.push(`file: yes len=${t.length} head="${t.slice(0, 8)}"`);
-    } else {
-      out.push('file: MISSING');
-    }
-  } catch (e) {
-    out.push('file: ERR ' + String(e));
-  }
-  try {
-    const k = await peekKey();
-    out.push(`key: ${k ? 'set len=' + k.length : 'MISSING'}`);
-  } catch (e) {
-    out.push('key: ERR ' + String(e));
-  }
-  out.push('ss-roundtrip: ' + (await secureStoreRoundTrip()));
-  out.push('crypto: ' + (await cryptoRoundTrip()));
-  out.push('save: ' + lastSaveInfo);
-  return out;
-}
-
-let lastSaveInfo = 'not-saved';
-export function getLastSaveInfo(): string {
-  return lastSaveInfo;
 }
 
 export async function saveData(data: PveData): Promise<void> {
   // Persist the data no matter what: encrypt when crypto-js works, but fall back
   // to a plain write if it throws — a failed encrypt must not silently drop the
-  // save (which is exactly what lost the IPs before). loadData reads either form.
+  // save (which is what lost the IPs before). loadData reads either form.
   const json = JSON.stringify(data);
   let content = json;
-  let note = 'plaintext';
   try {
     content = await encryptString(json);
-    note = 'encrypted';
-  } catch (e) {
-    note = 'plaintext (encrypt threw: ' + String(e) + ')';
+  } catch {
+    // crypto-js unavailable — persist plaintext rather than losing the save
   }
   try {
     const file = fileRef();
     if (!file.exists) file.create();
     file.write(content);
-    lastSaveInfo = `wrote ${note} len=${content.length}`;
-  } catch (e) {
-    lastSaveInfo = `write FAILED (${note}): ` + String(e);
+  } catch {
+    // ignore write failures
   }
 }

@@ -66,9 +66,10 @@ export default function App() {
   const shutdown = useShutdown({
     pveReach: reach.pve,
     pveHosts: data.servers.pve,
-    ssh: data.ssh,
+    shutdown: data.shutdown,
     powerOff: () => setPower(false),
   });
+  const gracefulConfigured = data.shutdown.token.trim().length > 0;
   const shuttingDown = shutdown.phase === 'sending' || shutdown.phase === 'waiting';
   const shutdownFailed = shutdown.phase === 'error';
   const shutdownActive = shuttingDown || shutdownFailed;
@@ -162,7 +163,7 @@ export default function App() {
   const tapHint = shuttingDown
     ? 'Cutting power once it’s down'
     : shutdownFailed
-      ? (shutdown.error ?? 'SSH failed')
+      ? (shutdown.error ?? 'Shutdown failed')
       : ready && !pending
         ? isOn
           ? 'Tap to turn off'
@@ -173,8 +174,9 @@ export default function App() {
     if (shutdownActive || !ready || pending) return;
     Haptics.selectionAsync();
     if (isOn) {
-      // Graceful SSH shutdown is deferred — off does a direct power cut for now.
-      setPower(false);
+      // Graceful shutdown if a token is set, otherwise a direct power cut.
+      if (gracefulConfigured) void shutdown.start();
+      else setPower(false);
     } else {
       setPower(true);
     }
@@ -317,8 +319,8 @@ export default function App() {
         visible={serverModalVisible}
         onClose={() => setServerModalVisible(false)}
         servers={data.servers}
-        ssh={data.ssh}
-        onSave={(servers, ssh) => store.commit({ ...store.getData(), servers, ssh })}
+        shutdown={data.shutdown}
+        onSave={(servers, shutdown) => store.commit({ ...store.getData(), servers, shutdown })}
       />
     </View>
   );

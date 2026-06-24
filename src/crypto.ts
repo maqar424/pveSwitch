@@ -45,35 +45,3 @@ export async function decryptString(ciphertext: string): Promise<string> {
   const key = await getKey();
   return CryptoJS.AES.decrypt(ciphertext, key).toString(CryptoJS.enc.Utf8);
 }
-
-// --- temporary diagnostics (to locate the persistence failure) ---
-
-/** Reads the stored data key without creating one. */
-export function peekKey(): Promise<string | null> {
-  return SecureStore.getItemAsync(KEY_NAME);
-}
-
-/** Verifies crypto-js encrypt+decrypt actually works in this JS runtime. */
-export async function cryptoRoundTrip(): Promise<string> {
-  try {
-    const sample = JSON.stringify({ t: Date.now(), s: 'pveSwitch' });
-    const ct = await encryptString(sample);
-    const pt = await decryptString(ct);
-    return pt === sample ? `OK (ct "${ct.slice(0, 6)}")` : `MISMATCH (ct "${ct.slice(0, 6)}")`;
-  } catch (e) {
-    return 'THROW ' + String(e);
-  }
-}
-
-/** Verifies secure-store can write+read within this session. */
-export async function secureStoreRoundTrip(): Promise<string> {
-  try {
-    const k = 'pveswitch_selftest';
-    const v = String(Date.now());
-    await SecureStore.setItemAsync(k, v);
-    const back = await SecureStore.getItemAsync(k);
-    return back === v ? 'OK' : `MISMATCH(${back})`;
-  } catch (e) {
-    return 'THROW ' + String(e);
-  }
-}
